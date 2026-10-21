@@ -1,4 +1,4 @@
-const V = "livro-caixa-v2";
+const V = "livro-caixa-v3";
 const SHELL = ["./","./index.html","./config.js","./manifest.webmanifest",
   "./vendor/firebase-app-compat.js","./vendor/firebase-auth-compat.js","./vendor/firebase-firestore-compat.js","./vendor/xlsx.full.min.js","./vendor/pdf.min.js","./vendor/pdf.worker.min.js",
   "./icons/icon-180.png","./icons/icon-192.png","./icons/icon-512.png"];

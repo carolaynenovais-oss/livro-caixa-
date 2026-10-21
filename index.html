@@ -970,11 +970,12 @@ function renderJars(){
     a.innerHTML=`
       <div class="top2"><div><h3>${esc(j.nome)}${j.exemplo?' <span class="tag">exemplo</span>':""}</h3><span class="hint">${j.meta?`Meta ${brl(j.meta)} · faltam ${brl(Math.max(0,j.meta-s))}`:"Sem meta definida"}</span></div><span class="saldo num">${brl(s)}</span></div>
       ${j.meta?`<div class="bar" style="--c:var(--save)"><i style="width:${pct.toFixed(1)}%"></i></div><span class="hint">${Math.round(pct)}% da meta</span>`:""}
-      <div class="actions"><button class="btn sm" type="button" data-a="g">Guardar</button><button class="btn sm ghost" type="button" data-a="r">Resgatar</button></div>
+      <div class="actions"><button class="btn sm" type="button" data-a="g">Guardar</button><button class="btn sm ghost" type="button" data-a="r">Retirar</button><button class="btn sm ghost" type="button" data-a="e">Emprestar daqui</button></div>
       <div class="history" hidden></div>
       <div class="foot"></div>`;
     a.querySelector('[data-a="g"]').onclick=()=>jarMovSheet(j,"guardar");
     a.querySelector('[data-a="r"]').onclick=()=>jarMovSheet(j,"resgatar");
+    a.querySelector('[data-a="e"]').onclick=()=>jarMovSheet(j,"resgatar",true);
     const h=a.querySelector(".history"), mv=[...(j.movs||[])].sort((x,y)=>y.data.localeCompare(x.data));
     h.hidden=!openHist.has(j.id);
     mv.forEach(x=>{ const it=document.createElement("div"); it.className="item";
@@ -1193,16 +1194,36 @@ function jarSheet(j){
     if(j) await store.update("cofrinhos",j.id,o); else await store.add("cofrinhos",{...o,movs:[],criado:Date.now()});
   });
 }
-function jarMovSheet(j,tipo){
-  openSheet(tipo==="guardar"?`Guardar em ${j.nome}`:`Resgatar de ${j.nome}`,[
+function jarMovSheet(j,tipo,emprestar){
+  if(tipo==="guardar") return openSheet(`Guardar em ${j.nome}`,[
     {id:"valor",label:"Valor (R$)",type:"money"},
     {id:"data",label:"Data",type:"date",value:TODAY},
-    {id:"conta",label:tipo==="guardar"?"Saiu de qual banco?":"Voltou para qual banco?",type:"select",options:bankOptions(),value:S.contas[0]?.id||"",wide:true}
-  ], tipo==="guardar"?"Guardar":"Resgatar", async v=>{
+    {id:"conta",label:"Saiu de qual banco?",type:"select",options:bankOptions(),value:S.contas[0]?.id||"",wide:true}
+  ],"Guardar", async v=>{
     const valor=money(v.valor,"Informe um valor maior que zero.");
-    if(tipo==="resgatar" && valor>jarSaldo(j)) throw new Error(`Este cofrinho tem ${brl(jarSaldo(j))}. Resgate até esse valor.`);
     await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo,valor,data:need(v.data,"Escolha a data."),conta:v.conta}]});
   });
+  // retirada: volta para um banco OU vira um empréstimo para alguém
+  openSheet(emprestar?`Emprestar do cofrinho ${j.nome}`:`Retirar de ${j.nome}`,[
+    {id:"valor",label:"Valor (R$)",type:"money"},
+    {id:"data",label:"Data",type:"date",value:TODAY},
+    {id:"destino",label:"Para onde foi o dinheiro?",type:"select",options:[...bankOptions().map(([v,l])=>[v,v?`Voltou para ${l}`:"Voltou, sem banco definido"]),["emprestimo","Emprestei para alguém"]],value:emprestar?"emprestimo":S.contas[0]?.id||"",wide:true},
+    {id:"pessoa",label:"Para quem? (se emprestou)",ph:"Ex.: João",wide:true},
+    {id:"total",label:"Total a devolver (opcional)",type:"money",help:"Preencha se houver juros."},
+    {id:"prev",label:"Combinado até (opcional)",type:"date",value:""}
+  ], emprestar?"Registrar empréstimo":"Retirar", async v=>{
+    const valor=money(v.valor,"Informe um valor maior que zero."), data=need(v.data,"Escolha a data.");
+    if(valor>jarSaldo(j)) throw new Error(`Este cofrinho tem ${brl(jarSaldo(j))}. Retire até esse valor.`);
+    if(v.destino==="emprestimo"){
+      const pessoa=need(v.pessoa,"Escreva para quem você emprestou.");
+      const total=money(v.total,"O total a devolver precisa ser um valor maior que zero.",true)||valor;
+      if(total<valor) throw new Error("O total a devolver não pode ser menor que o valor emprestado.");
+      await store.add("emprestimos",{direcao:"emprestei",pessoa,valor,aReceber:total,data,previsao:v.prev||"",obs:`Saiu do cofrinho ${j.nome}`,conta:"cofre:"+j.id,pagamentos:[],criado:Date.now()});
+      $("expMsg").textContent=`Empréstimo para ${pessoa} registrado. Quando devolver, use "Registrar recebimento" e escolha o cofrinho.`;
+    } else {
+      await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo:"resgatar",valor,data,conta:v.destino}]});
+    }
+  }, `Saldo do cofrinho: ${brl(jarSaldo(j))}.`);
 }
 function loanSheet(l){
   openSheet(l?"Editar empréstimo":"Novo empréstimo",[
