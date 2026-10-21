@@ -212,6 +212,26 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .fut summary .bar{grid-column:auto}
 .fut .item{grid-template-columns:1fr auto;padding-left:14px}
 
+/* importar fatura */
+dialog.big{width:min(880px,calc(100vw - 24px))}
+#imp .body{padding:18px;display:grid;gap:14px}
+.imp-sum{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:.88rem;color:var(--muted)}
+.imp-sum b{color:var(--ink)}
+.imp-tools{display:flex;flex-wrap:wrap;gap:6px}
+.imp-list{display:grid;max-height:min(56vh,560px);overflow:auto;border:1px solid var(--line);border-radius:12px}
+.imp-row{display:grid;grid-template-columns:auto 1fr 120px;gap:8px 10px;align-items:start;padding:10px 12px;border-top:1px solid var(--line)}
+.imp-row:first-child{border-top:0}
+.imp-row.off{background:var(--bg)}
+.imp-row.off .imp-desc,.imp-row.off .imp-val{opacity:.6}
+.imp-row input[type=checkbox]{width:20px;height:20px;margin-top:8px;accent-color:var(--accent)}
+.imp-desc,.imp-val{height:36px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:0 8px;width:100%;min-width:0}
+.imp-val{text-align:right;font-family:var(--mono)}
+.imp-meta{grid-column:2/-1;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:.8rem;color:var(--muted)}
+.imp-meta select,.imp-meta input{height:30px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:.8rem}
+.imp-meta input{width:44px;text-align:center}
+.imp-meta label{display:flex;gap:4px;align-items:center}
+@media (max-width:560px){.imp-row{grid-template-columns:auto 1fr}.imp-row .imp-val{grid-column:2}.imp-list{max-height:44vh}}
+
 /* janela */
 dialog{border:0;border-radius:16px;padding:0;background:var(--surface);color:var(--ink);width:min(540px,calc(100vw - 32px));max-height:calc(100vh - 32px);box-shadow:0 20px 60px rgba(0,0,0,.3)}
 dialog::backdrop{background:rgba(10,15,18,.5)}
@@ -395,6 +415,29 @@ img{max-width:100%}
   </form>
 </dialog>
 
+<dialog id="imp" class="big" aria-labelledby="impTitle">
+  <div class="body">
+    <div class="dh" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2 id="impTitle">Importar fatura</h2><button type="button" class="x" id="impClose" aria-label="Fechar" style="border:0;background:transparent;font-size:1.3rem;width:34px;height:34px;border-radius:8px;color:var(--muted)">×</button></div>
+    <div id="impStep1" style="display:grid;gap:12px">
+      <p class="hint" style="margin:0">Escolha o arquivo da fatura: <b>PDF</b> (pode ter senha), <b>CSV</b> ou <b>OFX</b>. Você revisa tudo antes de salvar.</p>
+      <div class="fields" style="grid-template-columns:1fr 1fr">
+        <div class="f"><label class="label" for="impKey">Qual fatura?</label><select id="impKey"></select></div>
+        <div class="f"><label class="label" for="impFile">Arquivo</label><input id="impFile" type="file" accept=".pdf,.csv,.ofx,.txt,application/pdf,text/csv"></div>
+        <div class="f" id="impPassWrap" hidden style="grid-column:1/-1"><label class="label" for="impPass">Senha do PDF</label><input id="impPass" type="password" autocomplete="off" placeholder="Muitos bancos usam os primeiros números do CPF"><span class="help">A senha é usada só para abrir o arquivo aqui no seu aparelho e não é guardada.</span></div>
+      </div>
+      <p class="err" id="impErr" role="status"></p>
+      <div class="actions"><button class="btn" type="button" id="impRead">Ler fatura</button><button class="btn ghost" type="button" id="impCancel">Cancelar</button></div>
+    </div>
+    <div id="impStep2" hidden style="display:grid;gap:12px">
+      <div class="imp-sum" id="impSum"></div>
+      <div class="imp-tools"><button class="link" type="button" id="impAll">Marcar todas</button><button class="link" type="button" id="impNone">Desmarcar todas</button></div>
+      <div class="imp-list" id="impList"></div>
+      <p class="err" id="impErr2" role="status"></p>
+      <div class="actions"><button class="btn" type="button" id="impGo">Importar</button><button class="btn ghost" type="button" id="impBack">Voltar</button></div>
+    </div>
+  </div>
+</dialog>
+
 
 <div class="login" id="login" hidden>
   <form class="card" id="loginForm" novalidate>
@@ -509,7 +552,10 @@ const isReady = () => ready.size===COLS.length+1;
 
 /* ---------- bancos ---------- */
 const contaById = id => S.contas.find(c=>c.id===id);
-const contaNome = id => id ? (contaById(id)?.nome || "Banco excluído") : "";
+const contaNome = id => !id ? "" : String(id).startsWith("cofre:") ? "Cofrinho "+(S.cofrinhos.find(j=>"cofre:"+j.id===id)?.nome||"excluído") : (contaById(id)?.nome || "Banco excluído");
+const isJarSrc = id => String(id||"").startsWith("cofre:");
+// empréstimos podem sair de (ou voltar para) um banco ou um cofrinho
+const loanSrcOptions = () => [...bankOptions(),...S.cofrinhos.map(j=>["cofre:"+j.id,"Cofrinho: "+j.nome])];
 function payOptions(cards){ const o=[["","Sem banco definido"]]; S.contas.forEach(c=>o.push(["conta:"+c.id,c.nome])); if(cards) S.cartoes.forEach(c=>o.push(["cartao:"+c.id,"Cartão "+c.nome])); return o; }
 const bankOptions = () => [["","Sem banco definido"],...S.contas.map(c=>[c.id,c.nome])];
 const payValue = m => m.forma==="cartao" ? "cartao:"+m.cartao : m.conta ? "conta:"+m.conta : "";
@@ -572,7 +618,16 @@ const FIX_TXT={ok:"Lançada",pendente:"Pendente",pulada:"Pulada"};
 const fixaPay = f => f.cartao ? "Cartão "+(cardById(f.cartao)?.nome||"") : contaNome(f.conta) || "Sem banco definido";
 
 /* ---------- cofrinhos e empréstimos ---------- */
-const jarSaldo = j => sum(j.movs||[], x=> x.tipo==="guardar"?x.valor:-x.valor);
+// movimentos de empréstimo ligados a um cofrinho (saiu do cofrinho / voltou para ele)
+function jarLoanMovs(j){
+  const k="cofre:"+j.id, out=[];
+  S.emprestimos.forEach(l=>{ const emp=l.direcao!=="peguei";
+    if(l.conta===k) out.push({data:l.data,valor:emp?-l.valor:l.valor,desc:emp?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`});
+    (l.pagamentos||[]).forEach(p=>{ if(p.conta===k) out.push({data:p.data,valor:emp?p.valor:-p.valor,desc:emp?`${l.pessoa} devolveu`:`Pago para ${l.pessoa}`}); });
+  });
+  return out;
+}
+const jarSaldo = j => sum(j.movs||[], x=> x.tipo==="guardar"?x.valor:-x.valor) + sum(jarLoanMovs(j),x=>x.valor);
 const loanTotal = l => l.aReceber||l.valor;
 const loanPago = l => sum(l.pagamentos||[], p=>p.valor);
 const loanFalta = l => Math.max(0, loanTotal(l)-loanPago(l));
@@ -599,15 +654,16 @@ function monthLines(y,m){
   }));
   S.emprestimos.forEach(l=>{
     const out=l.direcao!=="peguei";
-    if(inM(l.data)) L.push({data:l.data,g:"emprestimo",desc:out?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,sub:["Empréstimo",contaNome(l.conta)].filter(Boolean).join(" · "),v:out?-l.valor:l.valor,ex:l.exemplo,goLoan:true});
+    if(inM(l.data)) L.push({data:l.data,g:"emprestimo",desc:out?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,sub:["Empréstimo",contaNome(l.conta)].filter(Boolean).join(" · "),v:out?-l.valor:l.valor,ex:l.exemplo,goLoan:true,jar:isJarSrc(l.conta)});
     (l.pagamentos||[]).forEach(p=>{ if(!inM(p.data)) return;
-      L.push({data:p.data,g:"emprestimo",desc:out?`${l.pessoa} devolveu`:`Pagamento para ${l.pessoa}`,sub:["Empréstimo",contaNome(p.conta)].filter(Boolean).join(" · "),v:out?p.valor:-p.valor,ex:l.exemplo,delSub:["emprestimos",l,"pagamentos",p.id]}); });
+      const ab=p.tipo==="abatimento";
+      L.push({data:p.data,g:"emprestimo",desc:ab?`${l.pessoa}: abatido com outra dívida`:out?`${l.pessoa} devolveu`:`Pagamento para ${l.pessoa}`,sub:ab?"Empréstimo · abatimento, sem dinheiro movimentado":["Empréstimo",contaNome(p.conta)].filter(Boolean).join(" · "),v:out?p.valor:-p.valor,ex:l.exemplo,loanPay:[l,p],jar:ab||isJarSrc(p.conta)}); });
   });
   return L;
 }
 function monthTotals(L){
   const t={r:0,d:0,c:0,e:0};
-  L.forEach(x=>{ if(x.g==="receita") t.r+=x.v; else if(x.g==="despesa") t.d-=x.v; else if(x.g==="cofrinho") t.c+=x.v; else if(x.g==="emprestimo") t.e+=x.v; });
+  L.forEach(x=>{ if(x.jar) return; /* dinheiro que só trocou entre cofrinho e empréstimo não mexe no que sobrou */ if(x.g==="receita") t.r+=x.v; else if(x.g==="despesa") t.d-=x.v; else if(x.g==="cofrinho") t.c+=x.v; else if(x.g==="emprestimo") t.e+=x.v; });
   t.s=t.r-t.d+t.c+t.e; return t;
 }
 function catSpend(key){
@@ -789,6 +845,7 @@ function renderLedger(L){
     else if(x.goLoan){ act.append(linkBtn("Ver",()=>go("emprestimos"))); }
     else if(x.mov){ if(x.g!=="transf") act.append(linkBtn("Editar",()=>movSheet(x.mov)));
       act.append(delBtn("l:"+x.mov.id+":"+x.data,"Excluir",()=>store.remove("movs",x.mov.id),x.n>1?`Excluir as ${x.n} parcelas`:"Confirmar")); }
+    else if(x.loanPay){ act.append(delBtn("s:"+x.loanPay[1].id,"Excluir",()=>removeLoanPay(...x.loanPay))); }
     else if(x.delSub){ const [col,doc,field,sid]=x.delSub; act.append(delBtn("s:"+sid,"Excluir",()=>store.update(col,doc.id,{[field]:(doc[field]||[]).filter(i=>i.id!==sid)}))); }
     el.append(r);
   });
@@ -882,7 +939,7 @@ function renderCards(){
         <div class="fatnav"><button type="button" data-k="-1" aria-label="Fatura anterior">‹</button><div class="t"><b>Fatura de ${keyLabel(key)}</b><span class="hint">Fecha ${fmtDate(closeDate(c,key))} · vence ${fmtDate(dueDate(c,key))}</span></div><button type="button" data-k="1" aria-label="Próxima fatura">›</button></div>
         <div class="fattotal"><span class="num neg">${brl(tot)}</span><span class="actions"><span class="chip ${st}">${STATUS_TXT[st]}${paidFrom?" com "+esc(contaNome(paidFrom.conta)):""}</span></span></div>
         <div class="items"></div>
-        <div class="foot"><button class="btn sm" type="button" data-act="buy">Nova compra</button></div>
+        <div class="foot"><span class="actions"><button class="btn sm" type="button" data-act="buy">Nova compra</button><button class="btn sm ghost" type="button" data-act="imp">Importar fatura</button></span></div>
       </div>`;
     a.querySelectorAll(".fatnav button").forEach(b=>b.onclick=()=>{ fatView[c.id]=addM(key,+b.dataset.k); pending=null; render(); });
     if(tot>0 && !preHist(c,key)) a.querySelector(".fattotal .actions").append(linkBtn(isPaid(c,key)?"Desmarcar paga":"Marcar como paga",()=>payFatura(c,key)));
@@ -895,6 +952,7 @@ function renderCards(){
       list.append(it);
     });
     a.querySelector('[data-act="buy"]').onclick=()=>compraSheet(c);
+    a.querySelector('[data-act="imp"]').onclick=()=>openImport(c);
     const nCompras=S.movs.filter(m=>m.cartao===c.id).length;
     a.querySelector(".foot").append(linkBtn("Editar cartão",()=>cardSheet(c)), delBtn("card:"+c.id,"Excluir cartão",async()=>{ for(const m of S.movs.filter(m=>m.cartao===c.id)) await store.remove("movs",m.id); await store.remove("cartoes",c.id); }, nCompras?`Excluir cartão e ${nCompras} compra${nCompras>1?"s":""}`:"Confirmar"));
     el.append(a);
@@ -922,8 +980,13 @@ function renderJars(){
     mv.forEach(x=>{ const it=document.createElement("div"); it.className="item";
       it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${x.tipo==="guardar"?"Guardado":"Resgate"}${x.conta?` <small>${esc(contaNome(x.conta))}</small>`:""}</span><span class="num ${x.tipo==="guardar"?"pos":"neg"}">${x.tipo==="guardar"?"+":"−"} ${brl(x.valor)}</span><span></span>`;
       it.lastChild.append(delBtn("s:"+x.id,"Excluir",()=>store.update("cofrinhos",j.id,{movs:(j.movs||[]).filter(i=>i.id!==x.id)}))); h.append(it); });
+    const lm=jarLoanMovs(j).sort((x,y)=>y.data.localeCompare(x.data));
+    lm.forEach(x=>{ const it=document.createElement("div"); it.className="item";
+      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${esc(x.desc)} <small>Empréstimo</small></span><span class="num ${x.valor>0?"pos":"neg"}">${sbrl(x.valor)}</span><span></span>`;
+      it.lastChild.append(linkBtn("Ver",()=>go("emprestimos"))); h.append(it); });
+    if(lm.length) a.querySelector(".top2 .hint").textContent+=` · inclui ${lm.length} movimento${lm.length>1?"s":""} de empréstimo`;
     const f=a.querySelector(".foot");
-    if(mv.length) f.append(linkBtn(openHist.has(j.id)?"Esconder histórico":`Ver histórico (${mv.length})`,()=>{ openHist.has(j.id)?openHist.delete(j.id):openHist.add(j.id); render(); }));
+    if(mv.length+lm.length) f.append(linkBtn(openHist.has(j.id)?"Esconder histórico":`Ver histórico (${mv.length})`,()=>{ openHist.has(j.id)?openHist.delete(j.id):openHist.add(j.id); render(); }));
     f.append(linkBtn("Editar",()=>jarSheet(j)), delBtn("jar:"+j.id,"Excluir cofrinho",()=>store.remove("cofrinhos",j.id),"Confirmar exclusão"));
     el.append(a);
   });
@@ -953,15 +1016,18 @@ function renderLoans(){
         <div class="actions"></div>
         <div class="history" hidden></div>
         <div class="foot"></div>`;
-      if(falta>0){ const b=document.createElement("button"); b.className="btn sm"; b.type="button"; b.textContent=dir==="emprestei"?"Registrar recebimento":"Registrar pagamento"; b.onclick=()=>payLoanSheet(l); a.querySelector(".actions").append(b); }
+      if(falta>0){ const b=document.createElement("button"); b.className="btn sm"; b.type="button"; b.textContent=dir==="emprestei"?"Registrar recebimento":"Registrar pagamento"; b.onclick=()=>payLoanSheet(l); a.querySelector(".actions").append(b);
+        if(S.emprestimos.some(o=>(o.direcao||"emprestei")!==dir && loanFalta(o)>0)){ const c=document.createElement("button"); c.className="btn sm ghost"; c.type="button"; c.textContent="Abater com outra dívida"; c.onclick=()=>abaterSheet(l); a.querySelector(".actions").append(c); } }
       const h=a.querySelector(".history"), ps=[...(l.pagamentos||[])].sort((x,y)=>y.data.localeCompare(x.data));
       h.hidden=!openHist.has(l.id);
       ps.forEach(p=>{ const it=document.createElement("div"); it.className="item";
-        it.innerHTML=`<span class="hint num">${fmtDate(p.data)}</span><span>${dir==="emprestei"?"Recebido":"Pago"}</span><span class="num">${brl(p.valor)}</span><span></span>`;
-        it.lastChild.append(delBtn("s:"+p.id,"Excluir",()=>store.update("emprestimos",l.id,{pagamentos:(l.pagamentos||[]).filter(i=>i.id!==p.id)}))); h.append(it); });
+        const par=p.tipo==="abatimento"?S.emprestimos.find(o=>o.id===p.par):null;
+        const lbl=p.tipo==="abatimento"?`Abatido com a dívida ${par?(par.direcao==="peguei"?"que você tem com ":"de ")+par.pessoa:"excluída"}`:`${dir==="emprestei"?"Recebido":"Pago"}${p.conta?` <small>${esc(contaNome(p.conta))}</small>`:""}`;
+        it.innerHTML=`<span class="hint num">${fmtDate(p.data)}</span><span>${p.tipo==="abatimento"?esc(lbl):lbl}</span><span class="num">${brl(p.valor)}</span><span></span>`;
+        it.lastChild.append(delBtn("s:"+p.id,"Excluir",()=>removeLoanPay(l,p),p.tipo==="abatimento"?"Desfazer abatimento":"Confirmar")); h.append(it); });
       const f=a.querySelector(".foot");
       if(ps.length) f.append(linkBtn(openHist.has(l.id)?"Esconder pagamentos":`Ver pagamentos (${ps.length})`,()=>{ openHist.has(l.id)?openHist.delete(l.id):openHist.add(l.id); render(); }));
-      f.append(linkBtn("Editar",()=>loanSheet(l)), delBtn("loan:"+l.id,"Excluir",()=>store.remove("emprestimos",l.id),"Confirmar exclusão"));
+      f.append(linkBtn("Editar",()=>loanSheet(l)), delBtn("loan:"+l.id,"Excluir",async()=>{ for(const p of (l.pagamentos||[]).filter(p=>p.tipo==="abatimento")) await removeTwin(p); await store.remove("emprestimos",l.id); },"Confirmar exclusão"));
       g.append(a);
     });
     el.append(sec);
@@ -1146,12 +1212,17 @@ function loanSheet(l){
     {id:"total",label:"Total a devolver (opcional)",type:"money",value:l&&l.aReceber!==l.valor?cents(l.aReceber):"",help:"Preencha se houver juros."},
     {id:"data",label:"Data",type:"date",value:l?.data||TODAY},
     {id:"prev",label:"Combinado até (opcional)",type:"date",value:l?.previsao||""},
-    {id:"conta",label:"Banco usado",type:"select",options:bankOptions(),value:l?l.conta||"":S.contas[0]?.id||""},
+    {id:"conta",label:"Saiu de / entrou em",type:"select",options:loanSrcOptions(),value:l?l.conta||"":S.contas[0]?.id||"",help:"Banco ou cofrinho de onde o dinheiro saiu (ou para onde entrou)."},
     {id:"obs",label:"Observação (opcional)",value:l?.obs,ph:"Ex.: em 3 vezes"}
   ], l?"Salvar":"Registrar", async v=>{
     const valor=money(v.valor,"Informe o valor do empréstimo.");
     const total=money(v.total,"O total a devolver precisa ser um valor maior que zero.",true)||valor;
     if(total<valor) throw new Error("O total a devolver não pode ser menor que o valor emprestado.");
+    if(v.dir==="emprestei" && isJarSrc(v.conta)){
+      const j=S.cofrinhos.find(x=>"cofre:"+x.id===v.conta);
+      const disp=jarSaldo(j)+(l && l.conta===v.conta && l.direcao!=="peguei" ? l.valor : 0);
+      if(valor>disp) throw new Error(`O cofrinho ${j.nome} tem ${brl(disp)}. Escolha um valor até esse ou outro lugar de onde o dinheiro saiu.`);
+    }
     const o={direcao:v.dir,pessoa:need(v.pessoa,"Escreva o nome da pessoa."),valor,aReceber:total,data:need(v.data,"Escolha a data."),previsao:v.prev||"",obs:v.obs,conta:v.conta};
     if(l) await store.update("emprestimos",l.id,o); else await store.add("emprestimos",{...o,pagamentos:[],criado:Date.now()});
   });
@@ -1161,13 +1232,242 @@ function payLoanSheet(l){
   openSheet(out?`Recebimento de ${l.pessoa}`:`Pagamento para ${l.pessoa}`,[
     {id:"valor",label:"Valor (R$)",type:"money",help:`Falta ${brl(loanFalta(l))}.`},
     {id:"data",label:"Data",type:"date",value:TODAY},
-    {id:"conta",label:out?"Entrou em qual banco?":"Saiu de qual banco?",type:"select",options:bankOptions(),value:l.conta||S.contas[0]?.id||"",wide:true}
+    {id:"conta",label:out?"Entrou em (banco ou cofrinho)":"Saiu de (banco ou cofrinho)",type:"select",options:loanSrcOptions(),value:l.conta||S.contas[0]?.id||"",wide:true}
   ],"Registrar", async v=>{
     const valor=money(v.valor,"Informe um valor maior que zero.");
     if(valor>loanFalta(l)) throw new Error(`Falta só ${brl(loanFalta(l))}. Informe até esse valor.`);
+    if(!out && isJarSrc(v.conta)){ const j=S.cofrinhos.find(x=>"cofre:"+x.id===v.conta); if(valor>jarSaldo(j)) throw new Error(`O cofrinho ${j.nome} tem ${brl(jarSaldo(j))}. Pague até esse valor por ele.`); }
     await store.update("emprestimos",l.id,{pagamentos:[...(l.pagamentos||[]),{id:nid(),valor,data:need(v.data,"Escolha a data."),conta:v.conta}]});
   });
 }
+// abatimento: uma dívida compensa a outra, sem dinheiro sair de lugar nenhum
+function abaterSheet(l){
+  const dir=l.direcao||"emprestei";
+  const outras=S.emprestimos.filter(o=>(o.direcao||"emprestei")!==dir && loanFalta(o)>0)
+    .sort((a,b)=>(NORMP(b.pessoa)===NORMP(l.pessoa))-(NORMP(a.pessoa)===NORMP(l.pessoa)));
+  const lbl=o=>o.direcao==="peguei"?`Você deve ${brl(loanFalta(o))} para ${o.pessoa}`:`${o.pessoa} te deve ${brl(loanFalta(o))}`;
+  openSheet(`Abater: ${l.pessoa}`,[
+    {id:"outra",label:"Abater com qual dívida?",type:"select",options:outras.map(o=>[o.id,lbl(o)]),value:outras[0]?.id,wide:true},
+    {id:"valor",label:"Valor do abatimento (R$)",type:"money",value:cents(Math.min(loanFalta(l),loanFalta(outras[0]||l)))},
+    {id:"data",label:"Data",type:"date",value:TODAY}
+  ],"Abater", async v=>{
+    const o=S.emprestimos.find(x=>x.id===v.outra); if(!o) throw new Error("Escolha a outra dívida.");
+    const valor=money(v.valor,"Informe um valor maior que zero.");
+    const max=Math.min(loanFalta(l),loanFalta(o));
+    if(valor>max) throw new Error(`Dá para abater até ${brl(max)}, que é o que falta na menor das duas dívidas.`);
+    const data=need(v.data,"Escolha a data."), p1=nid(), p2=nid();
+    await store.update("emprestimos",l.id,{pagamentos:[...(l.pagamentos||[]),{id:p1,valor,data,conta:"",tipo:"abatimento",par:o.id,parPag:p2}]});
+    await store.update("emprestimos",o.id,{pagamentos:[...(o.pagamentos||[]),{id:p2,valor,data,conta:"",tipo:"abatimento",par:l.id,parPag:p1}]});
+  }, `${dir==="emprestei"?`${l.pessoa} te deve`:`Você deve para ${l.pessoa}`} ${brl(loanFalta(l))}. O valor abatido sai das duas dívidas ao mesmo tempo, sem mexer em banco nem cofrinho. O que sobrar continua em aberto.`);
+}
+const NORMP = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/\(.*?\)/g,"").trim();
+async function removeTwin(p){
+  const o=S.emprestimos.find(x=>x.id===p.par); if(!o) return;
+  await store.update("emprestimos",o.id,{pagamentos:(o.pagamentos||[]).filter(i=>i.id!==p.parPag)});
+}
+async function removeLoanPay(l,p){
+  await store.update("emprestimos",l.id,{pagamentos:(l.pagamentos||[]).filter(i=>i.id!==p.id)});
+  if(p.tipo==="abatimento") await removeTwin(p);
+}
+
+/* ---------- importar fatura (PDF, CSV, OFX) ---------- */
+const NORM = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+const CAT_RULES=[
+  [/\b(ifood|rappi|ze delivery|daki|restaurante?|lanchonete|lanches|padaria|panificadora|supermercados?|mercado(?! livre| pago|pago)|mercearia|carrefour|assai|atacadao|atacadista|hortifruti|acougue|pizzaria|pizza|burger|mc ?donalds|bk|subway|cafe|cafeteria|starbucks|outback|sushi|doceria|sorveteria|pao de acucar|extra|dia supermercado)\b/,"Alimentação"],
+  [/\b(posto|auto posto|shell|ipiranga|petrobras|combustiveis?|uber|99app|99 pop|99 taxi|cabify|estacionamento|estapar|sem parar|conectcar|veloe|pedagio|metro|onibus|bilhete unico|localiza|movida|unidas|zul)\b/,"Transporte"],
+  [/\b(netflix|spotify|prime video|amazon prime|disney|hbo|globoplay|youtube|apple com|icloud|google one|google storage|deezer|paramount|crunchyroll|chatgpt|openai|anthropic|claude ai|microsoft|xbox game pass|playstation plus|assinatura|mensalidade)\b/,"Assinaturas"],
+  [/\b(farmacia|drogaria|drogasil|droga raia|raia|pacheco|panvel|pague menos|hospital|clinica|laboratorio|odonto|dentista|medico|unimed|amil|hapvida|sulamerica|otica)\b/,"Saúde"],
+  [/\b(escola|colegio|curso|faculdade|universidade|udemy|alura|livraria|saraiva|kindle|duolingo|material escolar)\b/,"Educação"],
+  [/\b(cinema|cinemark|ingresso|ingressos|sympla|eventim|show|teatro|steam|playstation|nintendo|bar|cervejaria|boate|parque|hotel|airbnb|booking|decolar|latam|gol linhas|azul linhas|pousada)\b/,"Lazer"],
+  [/\b(claro|vivo|tim|oi|net virtua|enel|light|sabesp|copel|cemig|celesc|comgas|naturgy|condominio|internet|telefonia|seguro auto|porto seguro)\b/,"Contas"],
+  [/\b(geladeira|fogao|microondas|brastemp|consul|electrolux|eletro|eletrodomesticos?|leroy merlin|telhanorte|tok stok|etna|camicado|casas bahia|ponto frio|moveis|colchoes|madeiramadeira)\b/,"Casa"],
+  [/\b(magalu|magazine luiza|amazon|mercadolivre|mercado livre|shopee|shein|aliexpress|americanas|submarino|renner|riachuelo|c a|cea|zara|centauro|netshoes|nike|adidas|havaianas|boticario|natura|sephora|kalunga|hering|marisa)\b/,"Compras"],
+  [/\b(iof|juros|anuidade|encargos?|multa|tarifa|seguro cartao|protecao)\b/,"Outros"]
+];
+function guessCat(desc){
+  const n=NORM(desc), k=n.replace(/\d+/g,"").replace(/ /g,"").slice(0,10);
+  if(k.length>=4){ const prev=S.movs.find(m=>m.tipo==="despesa" && m.categoria && NORM(m.descricao).replace(/\d+/g,"").replace(/ /g,"").slice(0,10)===k); if(prev) return prev.categoria; }
+  for(const [re,c] of CAT_RULES) if(re.test(n)) return c;
+  return "Outros";
+}
+const MES3={jan:1,fev:2,feb:2,mar:3,abr:4,apr:4,mai:5,may:5,jun:6,jul:7,ago:8,aug:8,set:9,sep:9,out:10,oct:10,nov:11,dez:12,dec:12};
+function parseMoney(s){
+  s=String(s||"").trim().replace(/R\$\s?/i,"").replace(/\s/g,"");
+  s=s.replace(/−/g,"-"); const neg=/^-|-$|^\(.*\)$/.test(s); s=s.replace(/[()+\-]/g,"");
+  if(/,\d{1,2}$/.test(s)) s=s.replace(/\./g,"").replace(",","."); else s=s.replace(/,/g,"");
+  const n=Number(s); return s && isFinite(n) ? Math.round(n*100)*(neg?-1:1) : null;
+}
+function inferYear(d,mo,refKey){ const [ry,rm]=refKey.split("-").map(Number); return `${mo>rm?ry-1:ry}-${pad(mo)}-${pad(d)}`; }
+function parseDate(s,refKey){
+  s=String(s||"").trim().toLowerCase(); let m;
+  if((m=s.match(/^(\d{4})-(\d{2})-(\d{2})/))) return `${m[1]}-${m[2]}-${m[3]}`;
+  if((m=s.match(/^(\d{4})(\d{2})(\d{2})/))) return `${m[1]}-${m[2]}-${m[3]}`;
+  if((m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/))){ const y=m[3].length===2?2000+ +m[3]:+m[3]; return (+m[2]>=1&&+m[2]<=12)?`${y}-${pad(+m[2])}-${pad(+m[1])}`:null; }
+  if((m=s.match(/^(\d{1,2})[\/.-](\d{1,2})/))) return (+m[1]>=1&&+m[1]<=31&&+m[2]>=1&&+m[2]<=12)?inferYear(+m[1],+m[2],refKey):null;
+  if((m=s.match(/^(\d{1,2})\s*(?:de\s*)?([a-z]{3})/))){ const mo=MES3[m[2]]; return mo?inferYear(+m[1],mo,refKey):null; }
+  return null;
+}
+const DATE_P="(\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|\\d{1,2}\\s(?:de\\s)?(?:jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*\\.?)";
+const AMT_P="([-−]\\s?)?(?:R\\$\\s?)?([-−]\\s?)?(\\d{1,3}(?:\\.\\d{3})*,\\d{2})(\\s?[-−]|\\s[DC](?![a-z]))?";
+// lê linhas de texto (PDF ou CSV sem cabeçalho): "12/09 LOJA 2/10 R$ 129,90", várias por linha quando a fatura tem duas colunas
+function parseLines(lines,refKey){
+  const re=new RegExp(DATE_P+"\\s+(.+?)\\s+"+AMT_P+"(?=\\s+"+DATE_P+"\\s|\\s*$)","gi");
+  const rows=[]; let total=null;
+  for(const raw of lines){
+    const line=String(raw).replace(/\s+/g," ").trim(); if(!line) continue;
+    const nl=NORM(line);
+    if(total===null && /(total (da|desta|de) fatura|total a pagar|valor total|total da sua fatura|total dos lancamentos atuais)/.test(nl)){ const all=line.match(/\d{1,3}(?:\.\d{3})*,\d{2}/g); if(all) total=parseMoney(all[all.length-1]); }
+    let m; re.lastIndex=0;
+    while((m=re.exec(line))){
+      const date=parseDate(m[1],refKey); if(!date) continue;
+      const v=parseMoney(m[5]); if(!v) continue;
+      const neg=!!(m[3]||m[4]||(m[6]&&/[-−]|c/i.test(m[6])));
+      rows.push({date,desc:m[2],valor:neg?-v:v});
+    }
+  }
+  return {rows,total};
+}
+function parseCSV(text,refKey){
+  const lines=text.replace(/^﻿/,"").split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length) return {rows:[],total:null};
+  const delim=[";",",","\t"].sort((a,b)=>lines[0].split(b).length-lines[0].split(a).length)[0];
+  const split=l=>{ const out=[]; let cur="",q=false; for(const ch of l){ if(ch==='"'){ q=!q; continue; } if(ch===delim&&!q){ out.push(cur); cur=""; } else cur+=ch; } out.push(cur); return out.map(s=>s.trim()); };
+  let hi=-1, c={};
+  for(let i=0;i<Math.min(20,lines.length);i++){
+    const h=split(lines[i]).map(NORM);
+    const d=h.findIndex(x=>/^(date|data)/.test(x)), v=h.findIndex(x=>/(amount|valor|value|quantia)/.test(x) && !/us|dolar/.test(x)), t=h.findIndex(x=>/(title|descri|estabelecimento|lancamento|historico|detalhe|nome|memo)/.test(x));
+    if(d>=0 && v>=0){ hi=i; c={d,v,t}; break; }
+  }
+  if(hi<0) return parseLines(lines,refKey);
+  const rows=[];
+  for(const l of lines.slice(hi+1)){ const f=split(l); const date=parseDate(f[c.d],refKey), v=parseMoney(f[c.v]); if(!date||!v) continue; rows.push({date,desc:c.t>=0?f[c.t]:f.filter((_,i)=>i!==c.d&&i!==c.v).join(" "),valor:v}); }
+  return {rows,total:null};
+}
+function parseOFX(text,refKey){
+  return text.split(/<STMTTRN>/i).slice(1).map(b=>{ const g=t=>{ const m=b.match(new RegExp("<"+t+">([^<\\r\\n]*)","i")); return m?m[1].trim():""; };
+    return {date:parseDate(g("DTPOSTED"),refKey),desc:g("MEMO")||g("NAME"),valor:parseMoney(g("TRNAMT"))}; }).filter(r=>r.date&&r.valor);
+}
+function cleanDesc(s){
+  return String(s||"").replace(/[•·*]{2,}\s*\d{4}/g," ").replace(/\bfinal\s*\d{4}\b/gi," ").replace(/US\$\s?[\d.,]+/gi," ").replace(/R\$\s*$/,"").replace(/^[\s*\-–]+|[\s*\-–]+$/g,"").replace(/\s{2,}/g," ").trim();
+}
+function parcInfo(desc){
+  const m=desc.match(/(?:\bparc(?:ela)?\.?\s*)?\b(\d{1,2})\s*(?:\/|\bde\b)\s*(\d{1,2})(?!\d)/i); if(!m) return null;
+  const i=+m[1], n=+m[2]; if(n<2||n>48||i<1||i>n) return null;
+  return {i,n,clean:cleanDesc(desc.replace(m[0]," "))};
+}
+function buildItems(rows,card,key){
+  const pos=rows.filter(r=>r.valor>0).length, neg=rows.length-pos, sign=neg>pos?-1:1, used=new Set();
+  return rows.map((r,idx)=>{
+    let desc=cleanDesc(r.desc); const pi=parcInfo(desc); if(pi) desc=pi.clean||desc;
+    const nd=NORM(desc);
+    const credito = Math.sign(r.valor)!==sign || /^(pagamento|pgto|pag fatura|estorno|credito|cashback|desconto|saldo|total|ajuste a credito)/.test(nd);
+    const it={idx,desc,valor:Math.abs(r.valor),cat:guessCat(desc),i:pi?pi.i:1,n:pi?pi.n:1,date:r.date,kind:credito?"credito":"nova"};
+    if(!credito){ const k=nd.replace(/\d/g,"").replace(/ /g,"").slice(0,6);
+      const dup=P.find(p=>!used.has(p) && p.card===card.id && p.key===key && Math.abs(p.valor-it.valor)<=1 && (NORM(p.mov.descricao).replace(/\d/g,"").replace(/ /g,"").slice(0,6)===k || p.mov.data===it.date));
+      if(dup){ used.add(dup); it.kind="dup"; } }
+    it.sel=it.kind==="nova";
+    return it;
+  });
+}
+// data da compra que faz a parcela "i" cair na fatura escolhida
+function importDate(card,key,it){
+  const first=addM(key,-(it.i-1));
+  if(it.date && faturaKey(card,it.date)===first) return it.date;
+  const d=new Date(closeDate(card,first)+"T12:00:00");
+  for(let k=0;k<45;k++){ d.setDate(d.getDate()-1); const s=iso(d); if(faturaKey(card,s)===first) return s; }
+  return closeDate(card,first);
+}
+function loadPDFJS(){ return window.pdfjsLib ? Promise.resolve() : new Promise((ok,no)=>{ const s=document.createElement("script"); s.src="vendor/pdf.min.js"; s.onload=()=>{ pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js"; ok(); }; s.onerror=no; document.head.append(s); }); }
+async function pdfLines(buf,password){
+  await loadPDFJS();
+  const pdf=await pdfjsLib.getDocument({data:buf,password:password||undefined}).promise, lines=[];
+  for(let p=1;p<=pdf.numPages;p++){
+    const tc=await (await pdf.getPage(p)).getTextContent();
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>({x:i.transform[4],y:i.transform[5],s:i.str})).sort((a,b)=>b.y-a.y||a.x-b.x);
+    let row=[],ry=null; const flush=()=>{ if(row.length) lines.push(row.sort((a,b)=>a.x-b.x).map(i=>i.s).join(" ")); row=[]; };
+    for(const it of items){ if(ry===null||Math.abs(it.y-ry)>3){ flush(); ry=it.y; } row.push(it); }
+    flush();
+  }
+  return lines;
+}
+async function readText(f){ const buf=await f.arrayBuffer(); const t=new TextDecoder("utf-8").decode(buf); return t.includes("�") ? new TextDecoder("windows-1252").decode(buf) : t; }
+
+let IMP=null;
+function openImport(card){
+  IMP={card,items:[]};
+  const ok=openKey(card), keys=[]; for(let k=-4;k<=1;k++) keys.push(addM(ok,k));
+  $("impKey").innerHTML=keys.map(k=>`<option value="${k}">${keyLabel(k)} · vence ${fmtDate(dueDate(card,k))}${k===ok?" (aberta)":""}</option>`).join("");
+  $("impKey").value=addM(ok,-1);
+  $("impTitle").textContent=`Importar fatura: ${card.nome}`;
+  $("impFile").value=""; $("impPass").value=""; $("impPassWrap").hidden=true; $("impErr").textContent="";
+  $("impStep1").hidden=false; $("impStep2").hidden=true;
+  const d=$("imp"); try{ d.showModal(); }catch(e){ d.setAttribute("open",""); }
+}
+function impSummary(){
+  const sel=IMP.items.filter(i=>i.sel), tot=sum(sel,i=>i.valor), dups=IMP.items.filter(i=>i.kind==="dup").length;
+  const depois=fatTotal(IMP.card.id,IMP.key)+tot;
+  $("impSum").innerHTML=`<span><b>${IMP.items.length}</b> linhas lidas</span><span><b>${sel.length}</b> marcadas · <b class="num">${brl(tot)}</b></span>${dups?`<span>${dups} já estavam no app</span>`:""}<span>Fatura de ${keyLabel(IMP.key)} no app depois: <b class="num">${brl(depois)}</b></span>${IMP.total?`<span>Total no arquivo: <b class="num">${brl(IMP.total)}</b>${Math.abs(IMP.total-depois)<=100?" ✓ confere":""}</span>`:""}`;
+  const b=$("impGo"); b.disabled=!sel.length; b.textContent=sel.length?`Importar ${sel.length} compra${sel.length>1?"s":""}`:"Importar";
+}
+function showImpList(){
+  $("impStep1").hidden=true; $("impStep2").hidden=false; $("impErr2").textContent="";
+  const list=$("impList"); list.textContent="";
+  IMP.items.forEach(it=>{
+    const r=document.createElement("div"); r.className="imp-row"+(it.sel?"":" off");
+    const chip=it.kind==="dup"?`<span class="chip pulada">Já lançada no app</span>`:it.kind==="credito"?`<span class="chip aberta">Pagamento ou crédito</span>`:"";
+    r.innerHTML=`<input type="checkbox" ${it.sel?"checked":""} aria-label="Importar esta linha"><input class="imp-desc" value="${esc(it.desc)}" aria-label="Descrição"><input class="imp-val" inputmode="decimal" value="${cents(it.valor)}" aria-label="Valor nesta fatura">
+      <div class="imp-meta"><span class="num">${it.date?fmtDate(it.date):"sem data"}</span><select aria-label="Categoria">${withCat(CATS.despesa,it.cat).map(c=>`<option${c===it.cat?" selected":""}>${esc(c)}</option>`).join("")}</select><label>Parcela <input class="pi" inputmode="numeric" value="${it.i}" aria-label="Parcela atual"> de <input class="pn" inputmode="numeric" value="${it.n}" aria-label="Total de parcelas"></label>${chip}</div>`;
+    const [cb,desc,val,pi,pn]=r.querySelectorAll("input"), cat=r.querySelector("select");
+    cb.onchange=()=>{ it.sel=cb.checked; r.classList.toggle("off",!it.sel); impSummary(); };
+    desc.oninput=()=>{ it.desc=desc.value.trim(); };
+    val.oninput=()=>{ it.valor=parseValor(val.value)||0; impSummary(); };
+    cat.onchange=()=>{ it.cat=cat.value; };
+    pi.oninput=()=>{ it.i=parseInt(pi.value,10)||0; }; pn.oninput=()=>{ it.n=parseInt(pn.value,10)||0; };
+    list.append(r);
+  });
+  impSummary();
+}
+$("impRead").onclick=async()=>{
+  const f=$("impFile").files[0], err=$("impErr"); err.textContent="";
+  if(!f){ err.textContent="Escolha o arquivo da fatura."; return; }
+  const key=$("impKey").value, b=$("impRead"); b.disabled=true; b.textContent="Lendo…";
+  try{
+    let res;
+    if(/\.pdf$/i.test(f.name)||f.type==="application/pdf"){
+      let lines;
+      try{ lines=await pdfLines(new Uint8Array(await f.arrayBuffer()),$("impPass").value); }
+      catch(e){ if(e&&e.name==="PasswordException"){ $("impPassWrap").hidden=false; err.textContent=$("impPass").value?"Senha incorreta. Confira e tente de novo.":"Esse PDF tem senha. Digite a senha e toque em Ler fatura."; $("impPass").focus(); return; } throw e; }
+      if(lines.join("").replace(/\s/g,"").length<30){ err.textContent="Esse PDF parece ser uma foto ou digitalização, sem texto para ler. Baixe a fatura pelo app ou site do banco, ou use o arquivo CSV/OFX."; return; }
+      res=parseLines(lines,key);
+    } else {
+      const text=await readText(f);
+      res=/<OFX>|<STMTTRN>/i.test(text) ? {rows:parseOFX(text,key),total:null} : parseCSV(text,key);
+    }
+    if(!res.rows.length){ err.textContent="Não encontrei compras nesse arquivo. Confira se é a fatura do cartão. Se continuar, me mande um exemplo do seu banco para eu ajustar."; return; }
+    IMP.key=key; IMP.total=res.total; IMP.items=buildItems(res.rows,IMP.card,key);
+    showImpList();
+  }catch(e){ console.error(e); err.textContent="Não consegui ler esse arquivo. Tente o PDF baixado do app do banco, ou o CSV/OFX."; }
+  finally{ b.disabled=false; b.textContent="Ler fatura"; }
+};
+$("impGo").onclick=async()=>{
+  const sel=IMP.items.filter(i=>i.sel), err=$("impErr2"); err.textContent="";
+  for(const it of sel){
+    if(!it.desc){ err.textContent="Tem uma linha marcada sem descrição."; return; }
+    if(!(it.valor>0)){ err.textContent=`Confira o valor de “${it.desc}”.`; return; }
+    if(!(it.n>=1&&it.n<=48&&it.i>=1&&it.i<=it.n)){ err.textContent=`Confira a parcela de “${it.desc}”. Precisa ser algo como 3 de 10.`; return; }
+  }
+  const b=$("impGo"); b.disabled=true; b.textContent="Importando…";
+  try{
+    for(const it of sel) await store.add("movs",{tipo:"despesa",forma:"cartao",cartao:IMP.card.id,conta:"",parcelas:it.n,descricao:it.desc,categoria:it.cat,valor:it.valor*it.n,data:importDate(IMP.card,IMP.key,it),importado:true,criado:Date.now()});
+    fatView[IMP.card.id]=IMP.key; $("imp").close();
+    $("expMsg").textContent=`${sel.length} compra${sel.length>1?"s":""} importada${sel.length>1?"s":""} na fatura de ${keyLabel(IMP.key)}.`;
+    render();
+  }catch(e){ err.textContent="Não foi possível salvar agora. Tente de novo."; impSummary(); }
+};
+$("impAll").onclick=()=>{ IMP.items.forEach(i=>i.sel=true); showImpList(); };
+$("impNone").onclick=()=>{ IMP.items.forEach(i=>i.sel=false); showImpList(); };
+$("impBack").onclick=()=>{ $("impStep1").hidden=false; $("impStep2").hidden=true; };
+$("impClose").onclick=$("impCancel").onclick=()=>{ const d=$("imp"); if(d.open) d.close(); };
 
 /* ---------- formulário rápido ---------- */
 const tipoAtual=()=>document.querySelector('input[name=tipo]:checked').value;
