@@ -638,8 +638,9 @@ function faturaKey(card,dateStr){
 function dueDate(card,key){ const [y,m]=key.split("-").map(Number); return iso(new Date(y,m-1,Math.min(card.vencimento,dim(y,m-1)))); }
 function closeDate(card,key){ const [y,m]=key.split("-").map(Number); const d=new Date(y,(card.vencimento>card.fechamento?m-1:m-2),1); return iso(new Date(d.getFullYear(),d.getMonth(),Math.min(card.fechamento,dim(d.getFullYear(),d.getMonth())))); }
 const openKey = card => faturaKey(card,TODAY);
-const preHist = (card,key) => !!card.criado && dueDate(card,key) < iso(new Date(card.criado));
-const isPaid = (card,key) => (card.pagas||[]).includes(key) || preHist(card,key);
+// uma fatura só fica paga quando você marca (nunca sozinha)
+const preHist = () => false;
+const isPaid = (card,key) => (card.pagas||[]).includes(key);
 function fatStatus(card,key){
   if(isPaid(card,key)) return "paga";
   if(TODAY>dueDate(card,key)) return "vencida";
@@ -653,7 +654,7 @@ function buildParcelas(){
   S.movs.forEach(m=>{
     if(m.forma!=="cartao") return; const c=cardById(m.cartao); if(!c||!m.data) return;
     const n=Math.max(1,m.parcelas||1), k0=faturaKey(c,m.data);
-    for(let i=0;i<n;i++) P.push({mov:m,i,n,valor:splitVal(m.valor,n,i),key:addM(k0,i),card:m.cartao});
+    for(let i=Math.min(m.jaPagas||0,n-1);i<n;i++) P.push({mov:m,i,n,valor:splitVal(m.valor,n,i),key:addM(k0,i),card:m.cartao});
   });
   // contas fixas no cartão de crédito entram sozinhas na fatura de cada mês
   const ate=addM(NOWKEY,12);
@@ -668,7 +669,7 @@ function buildParcelas(){
 }
 const fatItems = (cid,key) => P.filter(p=>p.card===cid && p.key===key);
 const fatTotal = (cid,key) => sum(fatItems(cid,key),p=>p.valor);
-const expandCash = m => { const n=Math.max(1,m.parcelas||1); return Array.from({length:n},(_,i)=>({data:addMonthsDate(m.data,i),valor:splitVal(m.valor,n,i),i,n})); };
+const expandCash = m => { const n=Math.max(1,m.parcelas||1), j=Math.min(m.jaPagas||0,n-1); return Array.from({length:n},(_,i)=>({data:addMonthsDate(m.data,i),valor:splitVal(m.valor,n,i),i,n})).slice(j); };
 
 /* ---------- contas fixas ---------- */
 const fixaActive = (f,key) => !f.pausada && key>=f.inicio && (!f.fim || key<=f.fim);
@@ -947,7 +948,7 @@ async function payFatura(card,key){
   if(!S.contas.length) return store.update("cartoes",card.id,{pagas:[...arr,key],pagasDe:de});
   openSheet(`Pagar fatura ${card.nome}`,[
     {id:"conta",label:"Pago com qual conta?",type:"select",options:[["","Escolha a conta…"],...S.contas.map(c=>[c.id,c.nome]),["fora","Paguei sem usar conta corrente"]],value:"",wide:true},
-    {id:"data",label:"Data do pagamento",type:"date",value:TODAY,wide:true}
+    {id:"data",label:"Data do pagamento",type:"date",value:dueDate(card,key)<TODAY?dueDate(card,key):TODAY,wide:true,help:"Se pagou em outro dia, troque a data."}
   ],"Marcar como paga",async v=>{
     if(!v.conta) throw new Error("Escolha de qual conta saiu o pagamento.");
     const data=need(v.data,"Escolha a data do pagamento.");
@@ -1178,13 +1179,13 @@ function movSheet(m){
   openSheet(rec?"Editar receita":"Editar despesa",[
     {id:"desc",label:"Descrição",value:m.descricao,wide:true},
     {id:"valor",label:rec||!(m.parcelas>1)?"Valor (R$)":"Valor total (R$)",type:"money",value:cents(m.valor)},
-    ...(rec?[]:[{id:"parc",label:"Parcelas",type:"select",options:parcOpts(),value:String(m.parcelas||1)}]),
+    ...(rec?[]:[{id:"parc",label:"Parcelas",type:"select",options:parcOpts(),value:String(m.parcelas||1)},{id:"ja",label:"Já pagas antes do app",type:"select",options:Array.from({length:48},(_,i)=>[String(i),i?`${i} (começa na ${i+1}ª)`:"Nenhuma"]),value:String(m.jaPagas||0)}]),
     {id:"cat",label:"Categoria",type:"select",options:withCat(catList(rec?"receita":"despesa"),m.categoria),value:m.categoria,newCat:rec?"receita":"despesa"},
     {id:"pay",label:rec?"Entrou em":"Pagamento",type:"select",options:payOptions(!rec),value:payValue(m)},
     {id:"data",label:m.forma==="cartao"?"Data da compra":m.parcelas>1?"Data da 1ª parcela":"Data",type:"date",value:m.data,wide:rec}
   ],"Salvar alterações", async v=>{
     const o={descricao:need(v.desc,"Escreva uma descrição."),valor:money(v.valor,"Informe um valor maior que zero."),categoria:v.cat,data:need(v.data,"Escolha a data.")};
-    if(!rec) o.parcelas=+v.parc;
+    if(!rec){ o.parcelas=+v.parc; o.jaPagas=Math.min(+v.ja||0,o.parcelas-1); }
     applyPay(o,v.pay);
     if(o.forma==="cartao") fatView[o.cartao]=faturaKey(cardById(o.cartao),o.data);
     await store.update("movs",m.id,o);
@@ -1244,7 +1245,7 @@ function confirmFixaSheet(f,key){
   const rec=f.tipo==="receita", noCartao=!rec && !!f.cartao;
   openSheet(noCartao?`Ajustar valor: ${f.descricao}`:`${rec?"Confirmar recebimento":"Confirmar pagamento"}: ${f.descricao}`,[
     {id:"valor",label:"Valor deste mês (R$)",type:"money",value:cents(f.valor)},
-    {id:"data",label:noCartao?"Data da cobrança no cartão":rec?"Data do recebimento":"Data do pagamento",type:"date",value:noCartao?fixaDate(f,key):(key===NOWKEY||key<NOWKEY?TODAY:fixaDate(f,key))},
+    {id:"data",label:noCartao?"Data da cobrança no cartão":rec?"Data do recebimento":"Data do pagamento",type:"date",value:fixaDate(f,key)<TODAY?fixaDate(f,key):TODAY},
     {id:"pay",label:rec?"Entrou em":"Pago com",type:"select",options:payOptions(!rec),value:f.cartao?"cartao:"+f.cartao:f.conta?"conta:"+f.conta:"",wide:true}
   ], "Confirmar", async v=>{
     const o={tipo:rec?"receita":"despesa",descricao:f.descricao,categoria:f.categoria,valor:money(v.valor,"Informe o valor deste mês."),data:need(v.data,"Escolha a data."),fixa:f.id,mes:key,criado:Date.now()};
@@ -1280,11 +1281,12 @@ function compraSheet(c){
     {id:"modo",label:"O valor é",type:"select",options:[["total","Total da compra"],["parcela","De cada parcela"]],value:"total"},
     {id:"parc",label:"Parcelas",type:"select",options:parcOpts(),value:"1"},
     {id:"cat",label:"Categoria",type:"select",options:catList("despesa"),value:"Compras",newCat:"despesa"},
-    {id:"data",label:"Data da compra",type:"date",value:TODAY,wide:true,help:"Se já começou a pagar, use a data original da compra. As parcelas seguintes entram sozinhas nas próximas faturas."}
+    {id:"ja",label:"Já pagas antes do app",type:"select",options:Array.from({length:48},(_,i)=>[String(i),i?`${i} (começa na ${i+1}ª)`:"Nenhuma"]),value:"0",help:"Para compras que você já vinha pagando."},
+    {id:"data",label:"Data da compra",type:"date",value:TODAY,help:"Use a data original da compra."}
   ],"Adicionar compra", async v=>{
     const n=+v.parc, val=money(v.valor,"Informe o valor da compra.");
     await store.add("movs",{tipo:"despesa",forma:"cartao",cartao:c.id,conta:"",parcelas:n,descricao:need(v.desc,"Escreva o que você comprou."),
-      valor:v.modo==="parcela"?val*n:val,categoria:v.cat,data:need(v.data,"Escolha a data da compra."),criado:Date.now()});
+      valor:v.modo==="parcela"?val*n:val,categoria:v.cat,data:need(v.data,"Escolha a data da compra."),jaPagas:Math.min(+v.ja||0,n-1),criado:Date.now()});
     fatView[c.id]=faturaKey(c,v.data);
   });
 }
@@ -1582,7 +1584,7 @@ $("impGo").onclick=async()=>{
   }
   const b=$("impGo"); b.disabled=true; b.textContent="Importando…";
   try{
-    for(const it of sel) await store.add("movs",{tipo:"despesa",forma:"cartao",cartao:IMP.card.id,conta:"",parcelas:it.n,descricao:it.desc,categoria:it.cat,valor:it.valor*it.n,data:importDate(IMP.card,IMP.key,it),importado:true,criado:Date.now()});
+    for(const it of sel) await store.add("movs",{tipo:"despesa",forma:"cartao",cartao:IMP.card.id,conta:"",parcelas:it.n,descricao:it.desc,categoria:it.cat,valor:it.valor*it.n,data:importDate(IMP.card,IMP.key,it),jaPagas:it.i-1,importado:true,criado:Date.now()});
     fatView[IMP.card.id]=IMP.key; $("imp").close();
     $("expMsg").textContent=`${sel.length} compra${sel.length>1?"s":""} importada${sel.length>1?"s":""} na fatura de ${keyLabel(IMP.key)}.`;
     render();
