@@ -136,6 +136,15 @@ button:disabled{opacity:.6;cursor:default}
 .legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
 svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 
+/* conta corrente: veio → entrou → saiu → fica */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.flow>div{padding:12px 14px;display:grid;gap:2px;min-width:0}
+.flow>div+div{border-left:1px solid var(--line)}
+.flow .v{font-size:1.05rem;font-weight:500}
+@media (max-width:620px){.flow{grid-template-columns:1fr 1fr}.flow>div:nth-child(3){border-left:0}.flow>div:nth-child(n+3){border-top:1px solid var(--line)}}
+.history .item.bh{grid-template-columns:1fr auto auto}
+.history .item.bh .hint{min-width:92px;text-align:right}
+
 /* listas */
 .filters{display:flex;gap:8px;flex-wrap:wrap}
 .chips{display:flex;gap:4px;flex-wrap:wrap}
@@ -270,7 +279,7 @@ img{max-width:100%}
 
   <nav class="tabs" role="tablist" aria-label="Seções" id="tabs">
     <button role="tab" data-tab="inicio">Início</button>
-    <button role="tab" data-tab="bancos">Bancos</button>
+    <button role="tab" data-tab="bancos">Conta corrente</button>
     <button role="tab" data-tab="fixas">Contas fixas</button>
     <button role="tab" data-tab="cartoes">Cartões</button>
     <button role="tab" data-tab="cofrinhos">Cofrinhos</button>
@@ -296,6 +305,7 @@ img{max-width:100%}
       </nav>
     </div>
     <div class="summary" id="summary"></div>
+    <div class="card" id="carry" hidden></div>
 
     <form class="card" id="form" novalidate>
       <div class="sec-head">
@@ -308,7 +318,7 @@ img{max-width:100%}
       <div class="fields">
         <div class="f w3"><label class="label" for="fDesc">Descrição</label><input id="fDesc" maxlength="80" placeholder="Ex.: Mercado do mês" autocomplete="off"></div>
         <div class="f w1"><label class="label" for="fVal">Valor (R$)</label><input id="fVal" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
-        <div class="f w2"><label class="label" for="fCat">Categoria</label><select id="fCat"></select></div>
+        <div class="f w2"><label class="label" for="fCat">Categoria</label><select id="fCat"></select><input id="fCatNova" type="text" maxlength="30" placeholder="Nome da nova categoria" autocomplete="off" hidden></div>
         <div class="f w2"><label class="label" for="fPay" id="fPayLbl">Pagamento</label><select id="fPay"></select></div>
         <div class="f w1" id="parcWrap"><label class="label" for="fParc">Parcelas</label><select id="fParc"></select></div>
         <div class="f w1" id="modoWrap" hidden><label class="label" for="fModo">O valor é</label><select id="fModo"><option value="total">Total</option><option value="parcela">Da parcela</option></select></div>
@@ -321,7 +331,7 @@ img{max-width:100%}
 
     <div class="grid2">
       <div class="card">
-        <div class="sec-head"><h2>Gastos por categoria</h2><button class="link" type="button" id="budgetBtn">Definir limites</button></div>
+        <div class="sec-head"><h2>Gastos por categoria</h2><span class="actions" style="gap:0"><button class="link" type="button" id="catBtn">Categorias</button><button class="link" type="button" id="budgetBtn">Definir limites</button></span></div>
         <div class="cats" id="cats"></div>
       </div>
       <div class="card">
@@ -361,8 +371,8 @@ img{max-width:100%}
   <!-- BANCOS -->
   <section class="page" id="p-bancos" hidden>
     <div class="sec-head">
-      <div><h2>Bancos e carteira</h2><span class="hint" id="bankTotal"></span></div>
-      <div class="actions"><button class="btn ghost" type="button" id="transfBtn">Transferir</button><button class="btn" type="button" id="addBank">Novo banco</button></div>
+      <div><h2>Contas correntes e carteira</h2><span class="hint" id="bankTotal"></span><p class="hint" style="margin:2px 0 0">Aqui fica só o dinheiro disponível. O que está nos cofrinhos fica separado e não entra nesses saldos.</p></div>
+      <div class="actions"><button class="btn ghost" type="button" id="transfBtn">Transferir</button><button class="btn" type="button" id="addBank">Nova conta</button></div>
     </div>
     <div class="grid2" id="banksList"></div>
     <p class="hint" id="bankNote" style="margin:0"></p>
@@ -550,14 +560,35 @@ async function init(){
 }
 const isReady = () => ready.size===COLS.length+1;
 
+/* ---------- categorias ---------- */
+const catList = t => [...CATS[t], ...(((CFG.categorias||{})[t])||[])];
+async function addCategory(tipo,nome){
+  nome=nome.replace(/\s+/g," ").trim(); nome=nome.charAt(0).toUpperCase()+nome.slice(1);
+  const ja=catList(tipo).find(c=>NORM(c)===NORM(nome)); if(ja) return ja;
+  const cur=CFG.categorias||{}; await store.setCfg({categorias:{despesa:cur.despesa||[],receita:cur.receita||[],[tipo]:[...(cur[tipo]||[]),nome]}});
+  return nome;
+}
+function categoriesSheet(){
+  const cur=CFG.categorias||{}, list=t=>(cur[t]||[]);
+  const block=(t,title)=>`<div class="wide" style="display:grid;gap:6px"><span class="label">${title}</span>${list(t).length?list(t).map((c,i)=>`<div class="item" style="grid-template-columns:1fr auto"><span>${esc(c)}</span><button class="del" type="button" data-rm="${t}:${i}">Remover</button></div>`).join(""):'<span class="help">Nenhuma criada ainda.</span>'}</div>`;
+  openSheet("Suas categorias",[
+    {type:"html",html:block("despesa","Despesas criadas por você")+block("receita","Receitas criadas por você")},
+    {id:"tipo",label:"Nova categoria de",type:"select",options:[["despesa","Despesa"],["receita","Receita"]],value:"despesa"},
+    {id:"nome",label:"Nome",ph:"Ex.: Pets, Academia, Presentes"}
+  ],"Adicionar categoria",async v=>{ await addCategory(v.tipo,need(v.nome,"Escreva o nome da categoria.")); setTimeout(categoriesSheet,0); },
+  "As categorias que já vêm no app continuam sempre. Remover uma categoria sua não muda os lançamentos que já usam ela.");
+  $("shFields").querySelectorAll("[data-rm]").forEach(b=>b.onclick=async()=>{ const [t,i]=b.dataset.rm.split(":"); const arr=[...(cur[t]||[])]; arr.splice(+i,1);
+    await store.setCfg({categorias:{despesa:cur.despesa||[],receita:cur.receita||[],[t]:arr}}); categoriesSheet(); });
+}
+
 /* ---------- bancos ---------- */
 const contaById = id => S.contas.find(c=>c.id===id);
 const contaNome = id => !id ? "" : String(id).startsWith("cofre:") ? "Cofrinho "+(S.cofrinhos.find(j=>"cofre:"+j.id===id)?.nome||"excluído") : (contaById(id)?.nome || "Banco excluído");
 const isJarSrc = id => String(id||"").startsWith("cofre:");
 // empréstimos podem sair de (ou voltar para) um banco ou um cofrinho
 const loanSrcOptions = () => [...bankOptions(),...S.cofrinhos.map(j=>["cofre:"+j.id,"Cofrinho: "+j.nome])];
-function payOptions(cards){ const o=[["","Sem banco definido"]]; S.contas.forEach(c=>o.push(["conta:"+c.id,c.nome])); if(cards) S.cartoes.forEach(c=>o.push(["cartao:"+c.id,"Cartão "+c.nome])); return o; }
-const bankOptions = () => [["","Sem banco definido"],...S.contas.map(c=>[c.id,c.nome])];
+function payOptions(cards){ const o=[["","Nenhuma conta (não mexe em saldo)"]]; S.contas.forEach(c=>o.push(["conta:"+c.id,c.nome])); if(cards) S.cartoes.forEach(c=>o.push(["cartao:"+c.id,"Cartão "+c.nome])); return o; }
+const bankOptions = (vazio="Nenhuma conta (não mexe em saldo)") => [["",vazio],...S.contas.map(c=>[c.id,c.nome])];
 const payValue = m => m.forma==="cartao" ? "cartao:"+m.cartao : m.conta ? "conta:"+m.conta : "";
 function applyPay(o,v){ o.forma=""; o.cartao=""; o.conta=""; if(v.startsWith("cartao:")){ o.forma="cartao"; o.cartao=v.slice(7); } else if(v.startsWith("conta:")) o.conta=v.slice(6); return o; }
 const payLabel = m => m.forma==="cartao" ? "Cartão "+(cardById(m.cartao)?.nome||"") : contaNome(m.conta);
@@ -568,14 +599,33 @@ function bankFlows(limit){
     else if(m.tipo==="transferencia"){ if(m.data<=limit){ add(m.de,-m.valor); add(m.para,m.valor); } }
     else if(m.forma!=="cartao") expandCash(m).forEach(p=>{ if(p.data<=limit) add(m.conta,-p.valor); });
   });
-  S.cartoes.forEach(c=>(c.pagasDe||[]).forEach(p=>{ if((c.pagas||[]).includes(p.key)) add(p.conta,-fatTotal(c.id,p.key)); }));
+  S.cartoes.forEach(c=>(c.pagasDe||[]).forEach(p=>{ if((c.pagas||[]).includes(p.key) && (p.data||dueDate(c,p.key))<=limit) add(p.conta,-fatTotal(c.id,p.key)); }));
   S.cofrinhos.forEach(j=>(j.movs||[]).forEach(x=>{ if(x.data<=limit) add(x.conta, x.tipo==="guardar"?-x.valor:x.valor); }));
   S.emprestimos.forEach(l=>{ const out=l.direcao!=="peguei";
     if(l.data<=limit) add(l.conta, out?-l.valor:l.valor);
     (l.pagamentos||[]).forEach(p=>{ if(p.data<=limit) add(p.conta, out?p.valor:-p.valor); }); });
   return f;
 }
-const bankSaldo = (c,F) => (c.saldoInicial||0)+(F[c.id]||0);
+const bankSaldo = (c,F,limit=TODAY) => (c.saldoInicial||0)+sum((c.ajustes||[]).filter(a=>a.data<=limit),a=>a.valor)+(F[c.id]||0);
+const bankTotalAt = limit => { const F=bankFlows(limit); return sum(S.contas,c=>bankSaldo(c,F,limit)); };
+// extrato da conta corrente: de onde veio e para onde foi cada valor, com o saldo depois de cada um
+function bankHistory(c){
+  const id=c.id, H=[{data:"",desc:"Saldo quando a conta foi cadastrada",sub:c.criado?fmtDate(iso(new Date(c.criado))):"Saldo inicial",v:c.saldoInicial||0,ini:true}];
+  const add=(data,desc,sub,v)=>{ if(v && data) H.push({data,desc,sub,v}); };
+  (c.ajustes||[]).forEach(a=>add(a.data,"Ajuste de saldo","Para igualar com o app do banco",a.valor));
+  S.movs.forEach(m=>{ if(!m.data) return;
+    if(m.tipo==="receita"){ if(m.conta===id) add(m.data,m.descricao,"Receita · "+m.categoria,m.valor); }
+    else if(m.tipo==="transferencia"){ if(m.de===id) add(m.data,`Transferência para ${contaNome(m.para)}`,"Entre suas contas",-m.valor); if(m.para===id) add(m.data,`Transferência de ${contaNome(m.de)}`,"Entre suas contas",m.valor); }
+    else if(m.forma!=="cartao" && m.conta===id) expandCash(m).forEach(q=>add(q.data,m.descricao+(q.n>1?` (${q.i+1}/${q.n})`:""),"Despesa · "+m.categoria,-q.valor));
+  });
+  S.cartoes.forEach(cd=>(cd.pagasDe||[]).forEach(q=>{ if(q.conta===id && (cd.pagas||[]).includes(q.key)) add(q.data||dueDate(cd,q.key),`Fatura ${cd.nome}`,`Fatura de ${keyLabel(q.key)}`,-fatTotal(cd.id,q.key)); }));
+  S.cofrinhos.forEach(j=>(j.movs||[]).forEach(x=>{ if(x.conta===id) add(x.data,x.tipo==="guardar"?`Guardado no cofrinho ${j.nome}`:`Retirado do cofrinho ${j.nome}`,"Cofrinho",x.tipo==="guardar"?-x.valor:x.valor); }));
+  S.emprestimos.forEach(l=>{ const out=l.direcao!=="peguei";
+    if(l.conta===id) add(l.data,out?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,"Empréstimo",out?-l.valor:l.valor);
+    (l.pagamentos||[]).forEach(q=>{ if(q.conta===id) add(q.data,out?`${l.pessoa} devolveu`:`Pagamento para ${l.pessoa}`,"Empréstimo",out?q.valor:-q.valor); }); });
+  H.sort((a,b)=>a.data.localeCompare(b.data)); let run=0; H.forEach(h=>{ run+=h.v; h.saldo=run; });
+  return H;
+}
 
 /* ---------- cartões ---------- */
 const cardById = id => S.cartoes.find(c=>c.id===id);
@@ -650,7 +700,7 @@ function monthLines(y,m){
   });
   S.cofrinhos.forEach(j=>(j.movs||[]).forEach(x=>{
     if(!inM(x.data)) return;
-    L.push({data:x.data,g:"cofrinho",desc:x.tipo==="guardar"?`Guardado em ${j.nome}`:`Resgate de ${j.nome}`,sub:["Cofrinho",contaNome(x.conta)].filter(Boolean).join(" · "),v:x.tipo==="guardar"?-x.valor:x.valor,ex:j.exemplo,delSub:["cofrinhos",j,"movs",x.id]});
+    L.push({data:x.data,g:"cofrinho",desc:x.tipo==="guardar"?`Guardado em ${j.nome}`:`Resgate de ${j.nome}`,sub:"Cofrinho · "+(contaNome(x.conta)||(x.tipo==="guardar"?"não saiu de conta":"não foi para conta")),v:x.tipo==="guardar"?-x.valor:x.valor,ex:j.exemplo,delSub:["cofrinhos",j,"movs",x.id],jar:!x.conta});
   }));
   S.emprestimos.forEach(l=>{
     const out=l.direcao!=="peguei";
@@ -725,7 +775,7 @@ function renderInicio(){
   const receber=sum(S.emprestimos.filter(l=>l.direcao!=="peguei"),loanFalta);
   const dever=sum(S.emprestimos.filter(l=>l.direcao==="peguei"),loanFalta);
   let fat=0; S.cartoes.forEach(c=>{ const ok=openKey(c); [...new Set(P.filter(p=>p.card===c.id).map(p=>p.key))].forEach(k=>{ if(k<=ok && !isPaid(c,k)) fat+=fatTotal(c.id,k); }); });
-  const ov=[["bancos","Em bancos",bankT,"var(--ink)",S.contas.length?`${S.contas.length} banco${S.contas.length===1?"":"s"} e carteira`:"cadastre seus bancos"],
+  const ov=[["bancos","Disponível em conta",bankT,"var(--ink)",S.contas.length?"conta corrente, sem cofrinhos":"cadastre suas contas"],
     ["cofrinhos","Nos cofrinhos",jarT,"var(--save)",`${S.cofrinhos.length} cofrinho${S.cofrinhos.length===1?"":"s"}`],
     ["emprestimos","Para receber",receber,"var(--loan)","de quem te deve"],
     ["emprestimos","Você deve",dever,"var(--out)","empréstimos que pegou"],
@@ -746,7 +796,24 @@ function renderInicio(){
     <div class="cell"><span class="label">Cofrinhos</span><span class="mid num">${sbrl(t.c)}</span><span class="hint">${t.c<0?"guardado":t.c>0?"resgatado":"sem movimento"}</span></div>
     <div class="cell"><span class="label">Empréstimos</span><span class="mid num">${sbrl(t.e)}</span><span class="hint">saiu e voltou</span></div>`;
 
-  fillPay(); renderCats(key); renderFixMonth(key); renderHist(); renderFuture(); renderLedger(L);
+  renderCarry(view.y,view.m);
+  fillCats(); renderCats(key); renderFixMonth(key); renderHist(); renderFuture(); renderLedger(L);
+}
+
+function renderCarry(y,m){
+  const el=$("carry"); el.hidden=!S.contas.length; if(!S.contas.length) return;
+  const lastPrev=iso(new Date(y,m,0)), lastDay=iso(new Date(y,m+1,0)), pre=ymKey(y,m);
+  const ini=bankTotalAt(lastPrev), fim=bankTotalAt(lastDay);
+  let ent=0,sai=0; S.contas.forEach(c=>bankHistory(c).forEach(h=>{ if(!h.ini && h.data.startsWith(pre)){ if(h.v>0) ent+=h.v; else sai-=h.v; } }));
+  const futuro=lastDay>=TODAY, prevM=MESES[new Date(y,m-1,1).getMonth()], nextM=MESES[new Date(y,m+1,1).getMonth()];
+  el.innerHTML=`<div class="sec-head"><h2>Conta corrente em ${MESES[m]}</h2><span class="hint">Só contas correntes e carteira. Cofrinhos ficam de fora.</span></div>
+    <div class="flow">
+      <div><span class="label">Veio de ${prevM}</span><span class="num v">${brl(ini)}</span></div>
+      <div><span class="label">Entrou</span><span class="num v pos">+ ${brl(ent)}</span></div>
+      <div><span class="label">Saiu</span><span class="num v neg">− ${brl(sai)}</span></div>
+      <div><span class="label">${futuro?`Previsto para ${nextM}`:`Passou para ${nextM}`}</span><span class="num v ${fim<0?"neg":""}">${brl(fim)}</span></div>
+    </div>
+    <span class="hint">${futuro?"Inclui o que já está agendado até o fim do mês. ":""}Para ver de onde veio cada valor, abra o extrato de cada conta na aba Conta corrente.</span>`;
 }
 
 function renderCats(key){
@@ -864,8 +931,8 @@ async function payFatura(card,key){
   if(arr.includes(key)) return store.update("cartoes",card.id,{pagas:arr.filter(k=>k!==key),pagasDe:de});
   if(!S.contas.length) return store.update("cartoes",card.id,{pagas:[...arr,key],pagasDe:de});
   openSheet(`Pagar fatura ${card.nome}`,[
-    {id:"conta",label:"Pago com qual banco?",type:"select",options:bankOptions(),value:S.contas[0].id,wide:true}
-  ],"Marcar como paga",async v=>{ await store.update("cartoes",card.id,{pagas:[...arr,key],pagasDe:v.conta?[...de,{key,conta:v.conta}]:de}); },
+    {id:"conta",label:"Pago com qual conta?",type:"select",options:bankOptions(),value:"",wide:true}
+  ],"Marcar como paga",async v=>{ await store.update("cartoes",card.id,{pagas:[...arr,key],pagasDe:v.conta?[...de,{key,conta:v.conta,data:TODAY}]:de}); },
   `Fatura de ${keyLabel(key)}: ${brl(fatTotal(card.id,key))}. O valor sai do saldo do banco escolhido.`);
 }
 
@@ -873,20 +940,26 @@ async function payFatura(card,key){
 function renderBanks(){
   const el=$("banksList"); el.textContent="";
   const F=bankFlows(TODAY);
-  $("bankTotal").textContent=`Total: ${brl(sum(S.contas,c=>bankSaldo(c,F)))}`;
+  $("bankTotal").textContent=`Disponível hoje: ${brl(sum(S.contas,c=>bankSaldo(c,F)))}`;
   $("transfBtn").hidden=S.contas.length<2;
   const semBanco=S.movs.filter(m=>(m.tipo==="receita"||(m.tipo==="despesa"&&m.forma!=="cartao")) && !m.conta).length;
   $("bankNote").textContent = S.contas.length && semBanco ? `${semBanco} lançamento${semBanco>1?"s":""} sem banco definido não ${semBanco>1?"entram":"entra"} nos saldos. Use “Editar” no extrato para escolher o banco.` : "";
-  if(!S.contas.length){ el.innerHTML=`<div class="card empty" style="grid-column:1/-1"><strong>Nenhum banco cadastrado</strong><span>Cadastre cada conta, como Nubank, Caixa ou a carteira, com o saldo que tem hoje. Daí para frente o saldo se atualiza com cada lançamento.</span></div>`; return; }
+  if(!S.contas.length){ el.innerHTML=`<div class="card empty" style="grid-column:1/-1"><strong>Nenhuma conta corrente cadastrada</strong><span>Cadastre cada conta corrente, como Nubank, Caixa ou a carteira (sem os cofrinhos), com o saldo que tem hoje. Daí para frente o saldo se atualiza com cada lançamento.</span></div>`; return; }
   S.contas.forEach((c,i)=>{
     const s=bankSaldo(c,F);
-    const fut=bankFlows("9999-12-31")[c.id]||0, prev=(c.saldoInicial||0)+fut;
+    const prev=bankSaldo(c,bankFlows("9999-12-31"),"9999-12-31");
     const a=document.createElement("article"); a.className="card bank"; a.style.setProperty("--k",`var(--k${(i%5)+1})`);
     a.innerHTML=`<div class="top2"><div><h3>${esc(c.nome)}${c.exemplo?' <span class="tag">exemplo</span>':""}</h3><span class="hint">Saldo hoje</span></div></div>
       <div class="saldo num ${s<0?"neg":""}">${brl(s)}</div>
       ${prev!==s?`<span class="hint">Com o que já está agendado: ${brl(prev)}</span>`:""}
+      <div class="history" hidden></div>
       <div class="foot"></div>`;
-    a.querySelector(".foot").append(linkBtn("Ajustar saldo",()=>adjustSheet(c)),linkBtn("Renomear",()=>bankSheet(c)),delBtn("bank:"+c.id,"Excluir",()=>store.remove("contas",c.id),"Confirmar exclusão"));
+    const H=bankHistory(c), hk="bk:"+c.id, h=a.querySelector(".history"); h.hidden=!openHist.has(hk);
+    if(openHist.has(hk)){
+      const shown=[...H].reverse().slice(0,80);
+      h.innerHTML=`<div class="item" style="grid-template-columns:1fr auto;font-size:.75rem;color:var(--muted)"><span>Movimento</span><span>Valor · saldo depois</span></div>`+shown.map(x=>`<div class="item bh"><span><b>${esc(x.desc)}</b><small>${x.ini?esc(x.sub):fmtDate(x.data)+" · "+esc(x.sub)}${x.data>TODAY?' <span class="chip aberta">Agendado</span>':""}</small></span><span class="num ${x.v<0?"neg":"pos"}">${sbrl(x.v)}</span><span class="num hint">${brl(x.saldo)}</span></div>`).join("")+(H.length>80?`<p class="hint" style="margin:8px 0 0">Mostrando os 80 movimentos mais recentes. A planilha tem todos.</p>`:"");
+    }
+    a.querySelector(".foot").append(linkBtn(openHist.has(hk)?"Esconder extrato":`Ver extrato (${H.length})`,()=>{ openHist.has(hk)?openHist.delete(hk):openHist.add(hk); render(); }),linkBtn("Ajustar saldo",()=>adjustSheet(c)),linkBtn("Renomear",()=>bankSheet(c)),delBtn("bank:"+c.id,"Excluir",()=>store.remove("contas",c.id),"Confirmar exclusão"));
     el.append(a);
   });
 }
@@ -979,7 +1052,7 @@ function renderJars(){
     const h=a.querySelector(".history"), mv=[...(j.movs||[])].sort((x,y)=>y.data.localeCompare(x.data));
     h.hidden=!openHist.has(j.id);
     mv.forEach(x=>{ const it=document.createElement("div"); it.className="item";
-      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${x.tipo==="guardar"?"Guardado":"Resgate"}${x.conta?` <small>${esc(contaNome(x.conta))}</small>`:""}</span><span class="num ${x.tipo==="guardar"?"pos":"neg"}">${x.tipo==="guardar"?"+":"−"} ${brl(x.valor)}</span><span></span>`;
+      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${x.tipo==="guardar"?"Guardado":"Retirado"} <small>${x.conta?esc(contaNome(x.conta)):x.tipo==="guardar"?"sem sair de conta":"sem ir para conta"}</small></span><span class="num ${x.tipo==="guardar"?"pos":"neg"}">${x.tipo==="guardar"?"+":"−"} ${brl(x.valor)}</span><span></span>`;
       it.lastChild.append(delBtn("s:"+x.id,"Excluir",()=>store.update("cofrinhos",j.id,{movs:(j.movs||[]).filter(i=>i.id!==x.id)}))); h.append(it); });
     const lm=jarLoanMovs(j).sort((x,y)=>y.data.localeCompare(x.data));
     lm.forEach(x=>{ const it=document.createElement("div"); it.className="item";
@@ -1054,17 +1127,23 @@ function openSheet(title,fields,submit,onSubmit,intro){
     if(f.type==="html") return f.html;
     const id="sh_"+f.id; let inp;
     if(f.type==="file") inp=`<input id="${id}" type="file" accept=".json,application/json">`;
-    else if(f.type==="select") inp=`<select id="${id}">${opts(f.options).map(o=>`<option value="${esc(o.value)}"${String(o.value)===String(f.value??"")?" selected":""}>${esc(o.label)}</option>`).join("")}</select>`;
+    else if(f.type==="select") inp=`<select id="${id}">${opts(f.options).map(o=>`<option value="${esc(o.value)}"${String(o.value)===String(f.value??"")?" selected":""}>${esc(o.label)}</option>`).join("")}${f.newCat?'<option value="__nova">+ Nova categoria…</option>':""}</select>${f.newCat?`<input id="${id}_nova" type="text" maxlength="30" placeholder="Nome da nova categoria" autocomplete="off" hidden>`:""}`;
     else inp=`<input id="${id}" type="${f.type==="date"?"date":"text"}" ${f.type==="money"?'inputmode="decimal" placeholder="0,00"':""}${f.type==="day"?'inputmode="numeric" maxlength="2"':""} value="${esc(f.value??"")}" ${f.ph?`placeholder="${esc(f.ph)}"`:""} autocomplete="off">`;
     return `<div class="f${f.wide?" wide":""}"><label class="label" for="${id}">${esc(f.label)}</label>${inp}${f.help?`<span class="help">${esc(f.help)}</span>`:""}</div>`;
   }).join("");
   $("shForm").onsubmit=async e=>{
     e.preventDefault(); const v={}; fields.forEach(f=>{ if(f.type==="html") return; const el=$("sh_"+f.id); v[f.id]=f.type==="file"?el.files[0]:el.value.trim(); });
     const b=$("shSubmit"); b.disabled=true;
-    try{ await onSubmit(v); if(dlg.open) dlg.close(); }
+    try{
+      for(const f of fields) if(f.newCat && v[f.id]==="__nova"){
+        const nome=$("sh_"+f.id+"_nova").value.trim(); if(!nome) throw new Error("Escreva o nome da nova categoria.");
+        v[f.id]=await addCategory(typeof f.newCat==="function"?f.newCat(v):f.newCat,nome);
+      }
+      await onSubmit(v); if(dlg.open) dlg.close(); }
     catch(err){ $("shErr").textContent=err&&err.message&&!err.code?err.message:(err&&err.code==="quota_exceeded"?"Limite de registros atingido. Exclua alguns antigos.":"Não foi possível salvar. Tente de novo."); }
     finally{ b.disabled=false; }
   };
+  fields.forEach(f=>{ if(!f.newCat) return; const s=$("sh_"+f.id), n=$("sh_"+f.id+"_nova"); s.addEventListener("change",()=>{ n.hidden=s.value!=="__nova"; if(!n.hidden) n.focus(); }); });
   try{ dlg.showModal(); }catch(e){ dlg.setAttribute("open",""); }
   const first=$("shFields").querySelector("input:not([type=file]),select"); if(first && matchMedia("(min-width:721px)").matches) first.focus();
 }
@@ -1077,7 +1156,7 @@ function movSheet(m){
     {id:"desc",label:"Descrição",value:m.descricao,wide:true},
     {id:"valor",label:rec||!(m.parcelas>1)?"Valor (R$)":"Valor total (R$)",type:"money",value:cents(m.valor)},
     ...(rec?[]:[{id:"parc",label:"Parcelas",type:"select",options:parcOpts(),value:String(m.parcelas||1)}]),
-    {id:"cat",label:"Categoria",type:"select",options:withCat(CATS[rec?"receita":"despesa"],m.categoria),value:m.categoria},
+    {id:"cat",label:"Categoria",type:"select",options:withCat(catList(rec?"receita":"despesa"),m.categoria),value:m.categoria,newCat:rec?"receita":"despesa"},
     {id:"pay",label:rec?"Entrou em":"Pagamento",type:"select",options:payOptions(!rec),value:payValue(m)},
     {id:"data",label:m.forma==="cartao"?"Data da compra":m.parcelas>1?"Data da 1ª parcela":"Data",type:"date",value:m.data,wide:rec}
   ],"Salvar alterações", async v=>{
@@ -1102,10 +1181,11 @@ function bankSheet(c){
 function adjustSheet(c){
   const F=bankFlows(TODAY), atual=bankSaldo(c,F);
   openSheet(`Ajustar saldo: ${c.nome}`,[
-    {id:"saldo",label:"Saldo real de hoje (R$)",type:"money",value:cents(atual)||"0,00",wide:true,help:"Olhe o app do banco e digite o saldo de agora. Os lançamentos continuam iguais."}
+    {id:"saldo",label:"Saldo real de hoje (R$)",type:"money",value:cents(atual)||"0,00",wide:true,help:"Olhe o app do banco e digite o saldo de agora. A diferença aparece no extrato como “Ajuste de saldo”."}
   ],"Ajustar", async v=>{
     const s=parseValor(v.saldo,true); if(s===null) throw new Error("Informe o saldo, como 1.250,00 ou -80,00.");
-    await store.update("contas",c.id,{saldoInicial:s-(F[c.id]||0)});
+    if(s===atual) throw new Error("O saldo já está igual a esse valor.");
+    await store.update("contas",c.id,{ajustes:[...(c.ajustes||[]),{id:nid(),data:TODAY,valor:s-atual}]});
   }, `Hoje o app mostra ${brl(atual)}.`);
 }
 function transfSheet(){
@@ -1120,14 +1200,14 @@ function transfSheet(){
   });
 }
 function fixaSheet(f){
-  const cats=[...new Set([...CATS.despesa,...CATS.receita])];
+  const cats=[...new Set([...catList("despesa"),...catList("receita")])];
   openSheet(f?"Editar conta fixa":"Nova conta fixa",[
     {id:"tipo",label:"Tipo",type:"select",options:[["despesa","Despesa (conta a pagar)"],["receita","Receita (salário, aluguel recebido)"]],value:f?.tipo||"despesa",wide:true},
     {id:"desc",label:"Descrição",value:f?.descricao,ph:"Ex.: Conta de luz",wide:true},
     {id:"valor",label:"Valor de sempre (R$)",type:"money",value:cents(f?.valor),help:"Se muda todo mês, coloque uma média."},
     {id:"dia",label:"Dia do mês",type:"day",value:f?.dia,help:"Dia do vencimento ou do recebimento."},
-    {id:"cat",label:"Categoria",type:"select",options:cats,value:f?.categoria||"Contas"},
-    {id:"pay",label:"Paga ou recebe por",type:"select",options:payOptions(true),value:f?(f.cartao?"cartao:"+f.cartao:f.conta?"conta:"+f.conta:""):(S.contas[0]?"conta:"+S.contas[0].id:"")},
+    {id:"cat",label:"Categoria",type:"select",options:withCat(cats,f?.categoria),value:f?.categoria||"Contas",newCat:v=>v.tipo==="receita"?"receita":"despesa"},
+    {id:"pay",label:"Paga ou recebe por",type:"select",options:payOptions(true),value:f?(f.cartao?"cartao:"+f.cartao:f.conta?"conta:"+f.conta:""):""},
     {id:"ini",label:"Começa em",type:"select",options:monthOpts(-12,12),value:f?.inicio||NOWKEY},
     {id:"fim",label:"Termina em",type:"select",options:[["","Sem data para terminar"],...monthOpts(0,60)],value:f?.fim||""}
   ], f?"Salvar":"Criar conta fixa", async v=>{
@@ -1151,8 +1231,8 @@ function confirmFixaSheet(f,key){
 }
 function budgetSheet(){
   const lim=limits();
-  openSheet("Limites de gastos por mês",CATS.despesa.map(c=>({id:"b_"+c,label:c,type:"money",value:cents(lim[c])})),"Salvar limites", async v=>{
-    const out=[]; for(const c of CATS.despesa){ const raw=v["b_"+c]; if(!raw) continue; const n=parseValor(raw); if(n===null) throw new Error(`O limite de ${c} precisa ser um valor maior que zero, ou fique vazio.`); out.push({cat:c,valor:n}); }
+  openSheet("Limites de gastos por mês",catList("despesa").map(c=>({id:"b_"+c,label:c,type:"money",value:cents(lim[c])})),"Salvar limites", async v=>{
+    const out=[]; for(const c of catList("despesa")){ const raw=v["b_"+c]; if(!raw) continue; const n=parseValor(raw); if(n===null) throw new Error(`O limite de ${c} precisa ser um valor maior que zero, ou fique vazio.`); out.push({cat:c,valor:n}); }
     await store.setCfg({orcamentos:out});
   }, "Deixe vazio as categorias sem limite. Você recebe um aviso quando passar de 80% do limite.");
 }
@@ -1176,7 +1256,7 @@ function compraSheet(c){
     {id:"valor",label:"Valor (R$)",type:"money"},
     {id:"modo",label:"O valor é",type:"select",options:[["total","Total da compra"],["parcela","De cada parcela"]],value:"total"},
     {id:"parc",label:"Parcelas",type:"select",options:parcOpts(),value:"1"},
-    {id:"cat",label:"Categoria",type:"select",options:CATS.despesa,value:"Compras"},
+    {id:"cat",label:"Categoria",type:"select",options:catList("despesa"),value:"Compras",newCat:"despesa"},
     {id:"data",label:"Data da compra",type:"date",value:TODAY,wide:true,help:"Se já começou a pagar, use a data original da compra. As parcelas seguintes entram sozinhas nas próximas faturas."}
   ],"Adicionar compra", async v=>{
     const n=+v.parc, val=money(v.valor,"Informe o valor da compra.");
@@ -1198,7 +1278,7 @@ function jarMovSheet(j,tipo,emprestar){
   if(tipo==="guardar") return openSheet(`Guardar em ${j.nome}`,[
     {id:"valor",label:"Valor (R$)",type:"money"},
     {id:"data",label:"Data",type:"date",value:TODAY},
-    {id:"conta",label:"Saiu de qual banco?",type:"select",options:bankOptions(),value:S.contas[0]?.id||"",wide:true}
+    {id:"conta",label:"De onde veio esse dinheiro?",type:"select",options:bankOptions("Não saiu de conta (ex.: dinheiro que recebi direto)"),value:"",wide:true,help:"Só desconta de uma conta corrente se você escolher a conta aqui."}
   ],"Guardar", async v=>{
     const valor=money(v.valor,"Informe um valor maior que zero.");
     await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo,valor,data:need(v.data,"Escolha a data."),conta:v.conta}]});
@@ -1207,7 +1287,7 @@ function jarMovSheet(j,tipo,emprestar){
   openSheet(emprestar?`Emprestar do cofrinho ${j.nome}`:`Retirar de ${j.nome}`,[
     {id:"valor",label:"Valor (R$)",type:"money"},
     {id:"data",label:"Data",type:"date",value:TODAY},
-    {id:"destino",label:"Para onde foi o dinheiro?",type:"select",options:[...bankOptions().map(([v,l])=>[v,v?`Voltou para ${l}`:"Voltou, sem banco definido"]),["emprestimo","Emprestei para alguém"]],value:emprestar?"emprestimo":S.contas[0]?.id||"",wide:true},
+    {id:"destino",label:"Para onde foi o dinheiro?",type:"select",options:[...bankOptions().map(([v,l])=>[v,v?`Voltou para ${l}`:"Não foi para conta (ex.: usei em dinheiro)"]),["emprestimo","Emprestei para alguém"]],value:emprestar?"emprestimo":"",wide:true},
     {id:"pessoa",label:"Para quem? (se emprestou)",ph:"Ex.: João",wide:true},
     {id:"total",label:"Total a devolver (opcional)",type:"money",help:"Preencha se houver juros."},
     {id:"prev",label:"Combinado até (opcional)",type:"date",value:""}
@@ -1233,7 +1313,7 @@ function loanSheet(l){
     {id:"total",label:"Total a devolver (opcional)",type:"money",value:l&&l.aReceber!==l.valor?cents(l.aReceber):"",help:"Preencha se houver juros."},
     {id:"data",label:"Data",type:"date",value:l?.data||TODAY},
     {id:"prev",label:"Combinado até (opcional)",type:"date",value:l?.previsao||""},
-    {id:"conta",label:"Saiu de / entrou em",type:"select",options:loanSrcOptions(),value:l?l.conta||"":S.contas[0]?.id||"",help:"Banco ou cofrinho de onde o dinheiro saiu (ou para onde entrou)."},
+    {id:"conta",label:"Saiu de / entrou em",type:"select",options:loanSrcOptions(),value:l?l.conta||"":"",help:"Banco ou cofrinho de onde o dinheiro saiu (ou para onde entrou)."},
     {id:"obs",label:"Observação (opcional)",value:l?.obs,ph:"Ex.: em 3 vezes"}
   ], l?"Salvar":"Registrar", async v=>{
     const valor=money(v.valor,"Informe o valor do empréstimo.");
@@ -1253,7 +1333,7 @@ function payLoanSheet(l){
   openSheet(out?`Recebimento de ${l.pessoa}`:`Pagamento para ${l.pessoa}`,[
     {id:"valor",label:"Valor (R$)",type:"money",help:`Falta ${brl(loanFalta(l))}.`},
     {id:"data",label:"Data",type:"date",value:TODAY},
-    {id:"conta",label:out?"Entrou em (banco ou cofrinho)":"Saiu de (banco ou cofrinho)",type:"select",options:loanSrcOptions(),value:l.conta||S.contas[0]?.id||"",wide:true}
+    {id:"conta",label:out?"Entrou em (banco ou cofrinho)":"Saiu de (banco ou cofrinho)",type:"select",options:loanSrcOptions(),value:"",wide:true}
   ],"Registrar", async v=>{
     const valor=money(v.valor,"Informe um valor maior que zero.");
     if(valor>loanFalta(l)) throw new Error(`Falta só ${brl(loanFalta(l))}. Informe até esse valor.`);
@@ -1437,7 +1517,7 @@ function showImpList(){
     const r=document.createElement("div"); r.className="imp-row"+(it.sel?"":" off");
     const chip=it.kind==="dup"?`<span class="chip pulada">Já lançada no app</span>`:it.kind==="credito"?`<span class="chip aberta">Pagamento ou crédito</span>`:"";
     r.innerHTML=`<input type="checkbox" ${it.sel?"checked":""} aria-label="Importar esta linha"><input class="imp-desc" value="${esc(it.desc)}" aria-label="Descrição"><input class="imp-val" inputmode="decimal" value="${cents(it.valor)}" aria-label="Valor nesta fatura">
-      <div class="imp-meta"><span class="num">${it.date?fmtDate(it.date):"sem data"}</span><select aria-label="Categoria">${withCat(CATS.despesa,it.cat).map(c=>`<option${c===it.cat?" selected":""}>${esc(c)}</option>`).join("")}</select><label>Parcela <input class="pi" inputmode="numeric" value="${it.i}" aria-label="Parcela atual"> de <input class="pn" inputmode="numeric" value="${it.n}" aria-label="Total de parcelas"></label>${chip}</div>`;
+      <div class="imp-meta"><span class="num">${it.date?fmtDate(it.date):"sem data"}</span><select aria-label="Categoria">${withCat(catList("despesa"),it.cat).map(c=>`<option${c===it.cat?" selected":""}>${esc(c)}</option>`).join("")}</select><label>Parcela <input class="pi" inputmode="numeric" value="${it.i}" aria-label="Parcela atual"> de <input class="pn" inputmode="numeric" value="${it.n}" aria-label="Total de parcelas"></label>${chip}</div>`;
     const [cb,desc,val,pi,pn]=r.querySelectorAll("input"), cat=r.querySelector("select");
     cb.onchange=()=>{ it.sel=cb.checked; r.classList.toggle("off",!it.sel); impSummary(); };
     desc.oninput=()=>{ it.desc=desc.value.trim(); };
@@ -1492,19 +1572,19 @@ $("impClose").onclick=$("impCancel").onclick=()=>{ const d=$("imp"); if(d.open) 
 
 /* ---------- formulário rápido ---------- */
 const tipoAtual=()=>document.querySelector('input[name=tipo]:checked').value;
-let lastPay=null; try{ lastPay=localStorage.getItem("lc-pay"); }catch(e){}
-function fillCats(){ const t=tipoAtual(), s=$("fCat"), cur=s.value; s.innerHTML=CATS[t].map(c=>`<option>${c}</option>`).join(""); if(CATS[t].includes(cur)) s.value=cur; fillPay(); }
+let lastPay=null;
+function fillCats(){ const t=tipoAtual(), s=$("fCat"), cur=s.value, L=catList(t); s.innerHTML=L.map(c=>`<option>${esc(c)}</option>`).join("")+`<option value="__nova">+ Nova categoria…</option>`; if(L.includes(cur)) s.value=cur; $("fCatNova").hidden=s.value!=="__nova"; fillPay(); }
 function fillPay(){
   const rec=tipoAtual()==="receita", s=$("fPay"), cur=s.value||lastPay||"";
   s.innerHTML=opts(payOptions(!rec)).map(o=>`<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
-  if([...s.options].some(o=>o.value===cur)) s.value=cur; else if(S.contas[0]) s.value="conta:"+S.contas[0].id;
+  if([...s.options].some(o=>o.value===cur)) s.value=cur; else s.value="";
   const parc=!rec && $("fParc").value!=="1", card=s.value.startsWith("cartao:");
   $("fPayLbl").textContent=rec?"Entrou em":"Pagamento";
   $("parcWrap").hidden=rec; $("modoWrap").hidden=!parc; $("parcHint").hidden=!parc;
   $("fDateLbl").textContent = rec ? "Data" : card ? "Data da compra" : parc ? "Data da 1ª parcela" : "Data";
 }
 $("fParc").innerHTML=parcOpts().map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
-$("fPay").addEventListener("change",()=>{ lastPay=$("fPay").value; try{ localStorage.setItem("lc-pay",lastPay); }catch(e){} fillPay(); });
+$("fPay").addEventListener("change",()=>{ lastPay=$("fPay").value; fillPay(); });
 $("fParc").addEventListener("change",fillPay);
 document.querySelectorAll('input[name=tipo]').forEach(r=>r.addEventListener("change",fillCats));
 $("fDate").value=TODAY;
@@ -1519,7 +1599,9 @@ $("form").addEventListener("submit",async e=>{
   err.textContent="";
   const n = t==="despesa" ? +$("fParc").value : 1;
   const total = n>1 && $("fModo").value==="parcela" ? valor*n : valor;
-  const o={tipo:t,descricao:desc,valor:total,categoria:$("fCat").value,data,criado:Date.now()};
+  let cat=$("fCat").value;
+  if(cat==="__nova"){ const nm=$("fCatNova").value.trim(); if(!nm){ err.textContent="Escreva o nome da nova categoria."; $("fCatNova").focus(); return; } cat=await addCategory(t,nm); $("fCatNova").value=""; }
+  const o={tipo:t,descricao:desc,valor:total,categoria:cat,data,criado:Date.now()};
   if(n>1) o.parcelas=n;
   applyPay(o,pay); if(o.forma==="cartao") o.parcelas=n;
   try{
@@ -1560,7 +1642,9 @@ function buildWorkbook(){
   add("Resumo por mês",["Mês","Receitas","Despesas","Cofrinhos","Empréstimos","Sobrou"],resumo,[1,2,3,4,5]);
   add("Extrato",["Data","Tipo","Descrição","Detalhe","Valor","Situação"],mov,[4]);
   const F=bankFlows(TODAY);
-  add("Bancos",["Banco","Saldo hoje"],S.contas.map(c=>[c.nome,R(bankSaldo(c,F))]),[1]);
+  add("Conta corrente",["Conta","Saldo hoje"],S.contas.map(c=>[c.nome,R(bankSaldo(c,F))]),[1]);
+  const ext=[]; S.contas.forEach(c=>bankHistory(c).forEach(h=>ext.push([c.nome,h.ini?"":fmtDate(h.data),h.desc,h.sub,R(h.v),R(h.saldo),h.data>TODAY?"Agendado":"Feito"])));
+  add("Extrato das contas",["Conta","Data","Movimento","Detalhe","Valor","Saldo depois","Situação"],ext,[4,5]);
   add("Compras no cartão",["Cartão","Fatura","Vencimento","Data da compra","Descrição","Categoria","Parcela","Valor","Situação da fatura"],
     [...P].sort((a,b)=>a.key.localeCompare(b.key)||a.mov.data.localeCompare(b.mov.data)).map(p=>{ const c=cardById(p.card); return [c.nome,keyLabel(p.key),fmtDate(dueDate(c,p.key)),fmtDate(p.mov.data),p.mov.descricao,p.mov.categoria,p.n>1?`${p.i+1}/${p.n}`:"À vista",R(p.valor),STATUS_TXT[fatStatus(c,p.key)]]; }),[7]);
   add("Contas fixas",["Descrição","Tipo","Valor de costume","Dia","Categoria","Paga/recebe por","Começa","Termina","Este mês"],
@@ -1688,6 +1772,7 @@ $("next").onclick=()=>{ view.m++; if(view.m>11){view.m=0;view.y++;} pending=null
 $("chips").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; filtro=b.dataset.f; document.querySelectorAll("#chips button").forEach(x=>x.setAttribute("aria-pressed",x===b)); render(); });
 $("q").addEventListener("input",e=>{ busca=e.target.value; render(); });
 $("addCard").onclick=()=>cardSheet(); $("addJar").onclick=()=>jarSheet(); $("addLoan").onclick=()=>loanSheet();
+$("catBtn").onclick=()=>categoriesSheet(); $("fCat").addEventListener("change",()=>{ const n=$("fCatNova"); n.hidden=$("fCat").value!=="__nova"; if(!n.hidden) n.focus(); });
 $("addBank").onclick=()=>bankSheet(); $("transfBtn").onclick=()=>transfSheet(); $("addFixa").onclick=()=>fixaSheet(); $("budgetBtn").onclick=()=>budgetSheet();
 
 fillCats(); render(); init();
