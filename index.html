@@ -171,6 +171,7 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .chip.fechada,.chip.pendente{background:var(--loan-soft);color:var(--loan)}
 .chip.aberta{background:var(--accent-soft);color:var(--accent)}
 .chip.pulada,.chip.neutro{background:var(--bg);color:var(--muted)}
+.chip.cartao{background:var(--accent-soft);color:var(--accent)}
 .del{border:0;background:transparent;color:var(--muted);border-radius:7px;padding:4px 8px;font-size:.8rem;white-space:nowrap}
 .del:hover{background:var(--out-soft);color:var(--out)}
 .del.confirm{background:var(--out);color:var(--surface)}
@@ -654,6 +655,16 @@ function buildParcelas(){
     const n=Math.max(1,m.parcelas||1), k0=faturaKey(c,m.data);
     for(let i=0;i<n;i++) P.push({mov:m,i,n,valor:splitVal(m.valor,n,i),key:addM(k0,i),card:m.cartao});
   });
+  // contas fixas no cartão de crédito entram sozinhas na fatura de cada mês
+  const ate=addM(NOWKEY,12);
+  S.fixas.forEach(f=>{
+    if(!f.cartao || f.tipo==="receita" || !f.inicio) return; const c=cardById(f.cartao); if(!c) return;
+    for(let k=f.inicio, guard=0; k<=ate && guard<600; k=addM(k,1), guard++){
+      if(!fixaActive(f,k) || (f.pulados||[]).includes(k) || fixaMov(f,k)) continue;
+      const data=fixaDate(f,k);
+      P.push({mov:{id:"fx:"+f.id+":"+k,descricao:f.descricao,categoria:f.categoria,data,fixa:f.id,mes:k,virtual:true,cartao:c.id,valor:f.valor},i:0,n:1,valor:f.valor,key:faturaKey(c,data),card:c.id,fx:f});
+    }
+  });
 }
 const fatItems = (cid,key) => P.filter(p=>p.card===cid && p.key===key);
 const fatTotal = (cid,key) => sum(fatItems(cid,key),p=>p.valor);
@@ -663,8 +674,8 @@ const expandCash = m => { const n=Math.max(1,m.parcelas||1); return Array.from({
 const fixaActive = (f,key) => !f.pausada && key>=f.inicio && (!f.fim || key<=f.fim);
 const fixaDate = (f,key) => { const [y,m]=key.split("-").map(Number); return iso(new Date(y,m-1,Math.min(f.dia,dim(y,m-1)))); };
 const fixaMov = (f,key) => S.movs.find(m=>m.fixa===f.id && m.mes===key);
-function fixaState(f,key){ if(fixaMov(f,key)) return "ok"; if(!fixaActive(f,key)) return null; if((f.pulados||[]).includes(key)) return "pulada"; return "pendente"; }
-const FIX_TXT={ok:"Lançada",pendente:"Pendente",pulada:"Pulada"};
+function fixaState(f,key){ if(fixaMov(f,key)) return "ok"; if(!fixaActive(f,key)) return null; if((f.pulados||[]).includes(key)) return "pulada"; return f.cartao && f.tipo!=="receita" ? "cartao" : "pendente"; }
+const FIX_TXT={ok:"Lançada",pendente:"Pendente",pulada:"Pulada",cartao:"Na fatura do cartão"};
 const fixaPay = f => f.cartao ? "Cartão "+(cardById(f.cartao)?.nome||"") : contaNome(f.conta) || "Sem banco definido";
 
 /* ---------- cofrinhos e empréstimos ---------- */
@@ -989,6 +1000,7 @@ function renderFixas(){
       const periodo = f.pausada ? "Pausada" : f.fim ? `até ${keyLabel(f.fim)}` : `desde ${keyLabel(f.inicio)}`;
       r.innerHTML=`<span class="stripe"></span><span class="desc"><b>${esc(f.descricao)}${f.exemplo?'<span class="tag">exemplo</span>':""}</b><small>Todo dia ${f.dia} · ${esc(f.categoria)} · ${esc(fixaPay(f))} · ${periodo}${st?` · este mês: <span class="chip ${st}">${FIX_TXT[st]}${m?" "+brl(m.valor):""}</span>`:""}</small></span><span class="val num">${brl(f.valor)}</span><span class="act"></span>`;
       const act=r.lastChild;
+      if(st==="cartao"){ act.append(linkBtn("Ajustar valor do mês",()=>confirmFixaSheet(f,NOWKEY)),linkBtn("Pular mês",()=>store.update("fixas",f.id,{pulados:[...(f.pulados||[]),NOWKEY]}))); }
       if(st==="pendente"){ act.append(linkBtn("Confirmar",()=>confirmFixaSheet(f,NOWKEY)),linkBtn("Pular mês",()=>store.update("fixas",f.id,{pulados:[...(f.pulados||[]),NOWKEY]}))); }
       if(st==="pulada") act.append(linkBtn("Desfazer pulo",()=>store.update("fixas",f.id,{pulados:(f.pulados||[]).filter(k=>k!==NOWKEY)})));
       act.append(linkBtn("Editar",()=>fixaSheet(f)), linkBtn(f.pausada?"Retomar":"Pausar",()=>store.update("fixas",f.id,{pausada:!f.pausada})),
@@ -1008,7 +1020,7 @@ function renderCards(){
     const keys=[...new Set(P.filter(p=>p.card===c.id).map(p=>p.key))].sort();
     if(!fatView[c.id]){ const unpaid=keys.filter(k=>k<=ok && !isPaid(c,k)); fatView[c.id]=unpaid[0]||ok; }
     const key=fatView[c.id], items=fatItems(c.id,key), tot=sum(items,p=>p.valor), st=fatStatus(c,key);
-    const used=sum(P.filter(p=>p.card===c.id && !isPaid(c,p.key)),p=>p.valor), disp=c.limite-used;
+    const used=sum(P.filter(p=>p.card===c.id && !isPaid(c,p.key) && !(p.mov.virtual && p.key>ok)),p=>p.valor), disp=c.limite-used;
     const paidFrom=(c.pagasDe||[]).find(p=>p.key===key);
     const a=document.createElement("article"); a.className="card ccard"; a.style.setProperty("--k",`var(--k${c.cor||1})`);
     a.innerHTML=`
@@ -1030,6 +1042,8 @@ function renderCards(){
     items.sort((x,y)=>y.mov.data.localeCompare(x.mov.data)).forEach(p=>{
       const it=document.createElement("div"); it.className="item";
       it.innerHTML=`<span><b>${esc(p.mov.descricao)}</b><small>${fmtDate(p.mov.data)} · ${esc(p.mov.categoria)}${p.n>1?` · parcela ${p.i+1} de ${p.n}`:""}${p.mov.fixa?' <span class="tag">fixa</span>':""}</small></span><span class="num">${brl(p.valor)}</span><span class="act"></span>`;
+      if(p.mov.virtual){ it.querySelector("small").innerHTML=`Conta fixa · cobrada todo dia ${p.fx.dia} · ${esc(p.mov.categoria)} <span class="tag">fixa</span>`;
+        it.lastChild.append(linkBtn("Ajustar valor",()=>confirmFixaSheet(p.fx,p.mov.mes)), linkBtn("Pular mês",()=>store.update("fixas",p.fx.id,{pulados:[...(p.fx.pulados||[]),p.mov.mes]}))); list.append(it); return; }
       it.lastChild.append(linkBtn("Editar",()=>movSheet(p.mov)), delBtn("c:"+p.mov.id+":"+key,"Excluir",()=>store.remove("movs",p.mov.id),p.n>1?"Excluir as "+p.n+" parcelas":"Confirmar"));
       list.append(it);
     });
@@ -1227,10 +1241,10 @@ function fixaSheet(f){
   });
 }
 function confirmFixaSheet(f,key){
-  const rec=f.tipo==="receita";
-  openSheet(`${rec?"Confirmar recebimento":"Confirmar pagamento"}: ${f.descricao}`,[
+  const rec=f.tipo==="receita", noCartao=!rec && !!f.cartao;
+  openSheet(noCartao?`Ajustar valor: ${f.descricao}`:`${rec?"Confirmar recebimento":"Confirmar pagamento"}: ${f.descricao}`,[
     {id:"valor",label:"Valor deste mês (R$)",type:"money",value:cents(f.valor)},
-    {id:"data",label:rec?"Data do recebimento":"Data do pagamento",type:"date",value:key===NOWKEY||key<NOWKEY?TODAY:fixaDate(f,key)},
+    {id:"data",label:noCartao?"Data da cobrança no cartão":rec?"Data do recebimento":"Data do pagamento",type:"date",value:noCartao?fixaDate(f,key):(key===NOWKEY||key<NOWKEY?TODAY:fixaDate(f,key))},
     {id:"pay",label:rec?"Entrou em":"Pago com",type:"select",options:payOptions(!rec),value:f.cartao?"cartao:"+f.cartao:f.conta?"conta:"+f.conta:"",wide:true}
   ], "Confirmar", async v=>{
     const o={tipo:rec?"receita":"despesa",descricao:f.descricao,categoria:f.categoria,valor:money(v.valor,"Informe o valor deste mês."),data:need(v.data,"Escolha a data."),fixa:f.id,mes:key,criado:Date.now()};
