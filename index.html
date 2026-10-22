@@ -145,6 +145,17 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .history .item.bh{grid-template-columns:1fr auto auto}
 .history .item.bh .hint{min-width:92px;text-align:right}
 
+/* tabela por pessoa */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+.tbl{width:100%;border-collapse:collapse;font-size:.88rem;min-width:520px}
+.tbl th{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;text-align:left;padding:8px 12px;background:var(--bg)}
+.tbl td{padding:8px 12px;border-top:1px solid var(--line);vertical-align:top}
+.tbl td small{display:block;color:var(--muted);font-size:.75rem}
+.tbl .r{text-align:right;white-space:nowrap}
+.tbl tfoot td{font-weight:600;background:var(--bg)}
+.tbl tr.sel td{background:var(--accent-soft)}
+.tbl .link{padding:0;font-size:.9rem}
+
 /* listas */
 .filters{display:flex;gap:8px;flex-wrap:wrap}
 .chips{display:flex;gap:4px;flex-wrap:wrap}
@@ -1111,11 +1122,47 @@ function renderJars(){
 }
 
 /* ---------- aba empréstimos ---------- */
+let loanFilter=null;
+const nomesPessoas = () => loanPeople().map(p=>p.nome);
+// soma tudo por pessoa (mesmo nome = mesma pessoa, sem diferenciar acento ou maiúscula)
+function loanPeople(){
+  const G={};
+  S.emprestimos.forEach(l=>{
+    const k=NORMP(l.pessoa); if(!k) return;
+    const g=G[k]||(G[k]={k,nomes:{},deve:0,voceDeve:0,abertos:0,quitados:0,prazo:"",atraso:false});
+    g.nomes[l.pessoa]=(g.nomes[l.pessoa]||0)+1;
+    const f=loanFalta(l);
+    if(f>0){ g.abertos++; if(l.direcao==="peguei") g.voceDeve+=f; else g.deve+=f;
+      if(l.previsao){ if(!g.prazo||l.previsao<g.prazo) g.prazo=l.previsao; if(l.previsao<TODAY) g.atraso=true; } }
+    else g.quitados++;
+  });
+  return Object.values(G).map(g=>({...g,nome:Object.entries(g.nomes).sort((a,b)=>b[1]-a[1])[0][0],saldo:g.deve-g.voceDeve}))
+    .sort((a,b)=>(b.abertos>0)-(a.abertos>0) || Math.abs(b.saldo)-Math.abs(a.saldo) || a.nome.localeCompare(b.nome));
+}
+function loanPeopleTable(){
+  const ps=loanPeople(), wrap=document.createElement("div"); wrap.className="card";
+  const ab=ps.filter(p=>p.abertos), qt=ps.length-ab.length;
+  const tot=k=>sum(ab,p=>p[k]);
+  wrap.innerHTML=`<div class="sec-head"><h2>Resumo por pessoa</h2><span class="hint">Soma todos os empréstimos com o mesmo nome. Toque no nome para ver só os dela.</span></div>
+  <div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Pessoa</th><th class="r">Saldo</th><th class="r">Te deve</th><th class="r">Você deve</th><th>Prazo mais próximo</th></tr></thead>
+    <tbody>${ab.map(p=>`<tr${loanFilter===p.k?' class="sel"':""}><td><button class="link" type="button" data-p="${esc(p.k)}">${esc(p.nome)}</button><small>${p.abertos} em aberto${p.quitados?` · ${p.quitados} quitado${p.quitados>1?"s":""}`:""}</small></td>
+      <td class="r num ${p.saldo>0?"pos":p.saldo<0?"neg":""}"><b>${p.saldo>0?brl(p.saldo):p.saldo<0?brl(-p.saldo):"—"}</b><small>${p.saldo>0?"te deve":p.saldo<0?"você deve":"empatado"}</small></td>
+      <td class="r num">${p.deve?brl(p.deve):"—"}</td><td class="r num">${p.voceDeve?brl(p.voceDeve):"—"}</td>
+      <td>${p.prazo?`${fmtDate(p.prazo)}${p.atraso?' <span class="chip atrasado">Atrasado</span>':""}`:"—"}</td></tr>`).join("")||`<tr><td colspan="5" class="hint">Nenhum empréstimo em aberto.</td></tr>`}</tbody>
+    ${ab.length?`<tfoot><tr><td>Total</td><td class="r num ${tot("deve")-tot("voceDeve")>=0?"pos":"neg"}">${brl(Math.abs(tot("deve")-tot("voceDeve")))}<small>${tot("deve")>=tot("voceDeve")?"te devem":"você deve"}</small></td><td class="r num">${brl(tot("deve"))}</td><td class="r num">${brl(tot("voceDeve"))}</td><td></td></tr></tfoot>`:""}
+  </table></div>${qt?`<span class="hint">${qt} pessoa${qt>1?"s":""} com tudo quitado não aparece${qt>1?"m":""} aqui.</span>`:""}`;
+  wrap.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{ loanFilter=loanFilter===b.dataset.p?null:b.dataset.p; render(); });
+  return wrap;
+}
 function renderLoans(){
   const el=$("loansList"); el.textContent="";
   if(!S.emprestimos.length){ el.innerHTML=`<div class="card empty"><strong>Nenhum empréstimo registrado</strong><span>Registre quando emprestar dinheiro para alguém, ou quando pegar emprestado, e vá marcando cada pagamento.</span></div>`; return; }
+  el.append(loanPeopleTable());
+  if(loanFilter) { const b=document.createElement("div"); b.className="banner"; const nm=(S.emprestimos.find(l=>NORMP(l.pessoa)===loanFilter)||{}).pessoa||"";
+    b.innerHTML=`<span>Mostrando só os empréstimos de <b>${esc(nm)}</b>.</span>`; b.append(linkBtn("Ver todos",()=>{ loanFilter=null; render(); })); el.append(b); }
   [["emprestei","Você emprestou","Para receber"],["peguei","Você pegou emprestado","Você deve"]].forEach(([dir,title,lbl])=>{
-    const ls=S.emprestimos.filter(l=>(l.direcao||"emprestei")===dir);
+    const ls=S.emprestimos.filter(l=>(l.direcao||"emprestei")===dir && (!loanFilter || NORMP(l.pessoa)===loanFilter));
     if(!ls.length) return;
     const sec=document.createElement("div"); sec.className="page";
     sec.innerHTML=`<div class="sec-head"><h2>${title}</h2><span class="hint">${lbl}: <b class="num">${brl(sum(ls,loanFalta))}</b></span></div><div class="grid2"></div>`;
@@ -1172,7 +1219,7 @@ function openSheet(title,fields,submit,onSubmit,intro){
     const id="sh_"+f.id; let inp;
     if(f.type==="file") inp=`<input id="${id}" type="file" accept=".json,application/json">`;
     else if(f.type==="select") inp=`<select id="${id}">${opts(f.options).map(o=>`<option value="${esc(o.value)}"${String(o.value)===String(f.value??"")?" selected":""}>${esc(o.label)}</option>`).join("")}${f.newCat?'<option value="__nova">+ Nova categoria…</option>':""}</select>${f.newCat?`<input id="${id}_nova" type="text" maxlength="30" placeholder="Nome da nova categoria" autocomplete="off" hidden>`:""}`;
-    else inp=`<input id="${id}" type="${f.type==="date"?"date":"text"}" ${f.type==="money"?'inputmode="decimal" placeholder="0,00"':""}${f.type==="day"?'inputmode="numeric" maxlength="2"':""} value="${esc(f.value??"")}" ${f.ph?`placeholder="${esc(f.ph)}"`:""} autocomplete="off">`;
+    else inp=`<input id="${id}" type="${f.type==="date"?"date":"text"}" ${f.type==="money"?'inputmode="decimal" placeholder="0,00"':""}${f.type==="day"?'inputmode="numeric" maxlength="2"':""} value="${esc(f.value??"")}" ${f.ph?`placeholder="${esc(f.ph)}"`:""} autocomplete="off"${f.sugestoes?` list="${id}_dl"`:""}>${f.sugestoes?`<datalist id="${id}_dl">${f.sugestoes.map(x=>`<option value="${esc(x)}">`).join("")}</datalist>`:""}`;
     return `<div class="f${f.wide?" wide":""}"><label class="label" for="${id}">${esc(f.label)}</label>${inp}${f.help?`<span class="help">${esc(f.help)}</span>`:""}</div>`;
   }).join("");
   $("shForm").onsubmit=async e=>{
@@ -1372,7 +1419,7 @@ function jarMovSheet(j,tipo,emprestar){
     {id:"valor",label:"Valor (R$)",type:"money"},
     {id:"data",label:"Data",type:"date",value:TODAY},
     {id:"destino",label:"Para onde foi o dinheiro?",type:"select",options:[...bankOptions().map(([v,l])=>[v,v?`Voltou para ${l}`:"Não foi para conta (ex.: usei em dinheiro)"]),["emprestimo","Emprestei para alguém"]],value:emprestar?"emprestimo":"",wide:true},
-    {id:"pessoa",label:"Para quem? (se emprestou)",ph:"Ex.: João",wide:true},
+    {id:"pessoa",label:"Para quem? (se emprestou)",ph:"Ex.: João",wide:true,sugestoes:nomesPessoas()},
     {id:"total",label:"Total a devolver (opcional)",type:"money",help:"Preencha se houver juros."},
     {id:"prev",label:"Combinado até (opcional)",type:"date",value:""}
   ], emprestar?"Registrar empréstimo":"Retirar", async v=>{
@@ -1392,7 +1439,7 @@ function jarMovSheet(j,tipo,emprestar){
 function loanSheet(l){
   openSheet(l?"Editar empréstimo":"Novo empréstimo",[
     {id:"dir",label:"Tipo",type:"select",options:[["emprestei","Emprestei para alguém"],["peguei","Peguei emprestado"]],value:l?.direcao||"emprestei",wide:true},
-    {id:"pessoa",label:"Pessoa",value:l?.pessoa,ph:"Ex.: João",wide:true},
+    {id:"pessoa",label:"Pessoa",value:l?.pessoa,ph:"Ex.: João",wide:true,sugestoes:nomesPessoas(),help:"Use sempre o mesmo nome para a pessoa. Assim o resumo soma tudo dela."},
     {id:"valor",label:"Valor (R$)",type:"money",value:cents(l?.valor)},
     {id:"total",label:"Total a devolver (opcional)",type:"money",value:l&&l.aReceber!==l.valor?cents(l.aReceber):"",help:"Preencha se houver juros."},
     {id:"data",label:"Data",type:"date",value:l?.data||TODAY},
@@ -1738,6 +1785,8 @@ function buildWorkbook(){
   add("Cofrinhos",["Cofrinho","Data","Movimento","Valor","Banco / meta"],cr,[3]);
   add("Empréstimos",["Pessoa","Tipo","Valor","Total a devolver","Já pago","Falta","Data","Combinado até","Observação"],
     S.emprestimos.map(l=>[l.pessoa,l.direcao==="peguei"?"Peguei emprestado":"Emprestei",R(l.valor),R(loanTotal(l)),R(loanPago(l)),R(loanFalta(l)),fmtDate(l.data),fmtDate(l.previsao),l.obs||""]),[2,3,4,5]);
+  add("Empréstimos por pessoa",["Pessoa","Te deve","Você deve","Saldo","Em aberto","Quitados","Prazo mais próximo"],
+    loanPeople().map(p=>[p.nome,R(p.deve),R(p.voceDeve),R(p.saldo),p.abertos,p.quitados,fmtDate(p.prazo)]),[1,2,3]);
   return wb;
 }
 function saveFile(name,data,type){
