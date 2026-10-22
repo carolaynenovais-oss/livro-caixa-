@@ -805,6 +805,9 @@ function renderCarry(y,m){
   const lastPrev=iso(new Date(y,m,0)), lastDay=iso(new Date(y,m+1,0)), pre=ymKey(y,m);
   const ini=bankTotalAt(lastPrev), fim=bankTotalAt(lastDay);
   let ent=0,sai=0; S.contas.forEach(c=>bankHistory(c).forEach(h=>{ if(!h.ini && h.data.startsWith(pre)){ if(h.v>0) ent+=h.v; else sai-=h.v; } }));
+  const fatPend=sum(S.cartoes,c=>isPaid(c,pre)?0:fatTotal(c.id,pre));
+  const fixPend=sum(S.fixas.filter(f=>f.tipo!=="receita" && fixaState(f,pre)==="pendente"),f=>f.valor);
+  const pendTxt=(fatPend||fixPend)?`<div class="ok-line" style="background:var(--loan-soft);border-color:transparent;color:var(--ink)">Ainda não saiu da conta: ${[fatPend?`<b class="num">${brl(fatPend)}</b> em faturas de cartão`:"",fixPend?`<b class="num">${brl(fixPend)}</b> em contas fixas`:""].filter(Boolean).join(" e ")}. Só sai quando você marcar como paga.</div>`:"";
   const futuro=lastDay>=TODAY, prevM=MESES[new Date(y,m-1,1).getMonth()], nextM=MESES[new Date(y,m+1,1).getMonth()];
   el.innerHTML=`<div class="sec-head"><h2>Conta corrente em ${MESES[m]}</h2><span class="hint">Só contas correntes e carteira. Cofrinhos ficam de fora.</span></div>
     <div class="flow">
@@ -813,6 +816,7 @@ function renderCarry(y,m){
       <div><span class="label">Saiu</span><span class="num v neg">− ${brl(sai)}</span></div>
       <div><span class="label">${futuro?`Previsto para ${nextM}`:`Passou para ${nextM}`}</span><span class="num v ${fim<0?"neg":""}">${brl(fim)}</span></div>
     </div>
+    ${pendTxt}
     <span class="hint">${futuro?"Inclui o que já está agendado até o fim do mês. ":""}Para ver de onde veio cada valor, abra o extrato de cada conta na aba Conta corrente.</span>`;
 }
 
@@ -931,9 +935,14 @@ async function payFatura(card,key){
   if(arr.includes(key)) return store.update("cartoes",card.id,{pagas:arr.filter(k=>k!==key),pagasDe:de});
   if(!S.contas.length) return store.update("cartoes",card.id,{pagas:[...arr,key],pagasDe:de});
   openSheet(`Pagar fatura ${card.nome}`,[
-    {id:"conta",label:"Pago com qual conta?",type:"select",options:bankOptions(),value:"",wide:true}
-  ],"Marcar como paga",async v=>{ await store.update("cartoes",card.id,{pagas:[...arr,key],pagasDe:v.conta?[...de,{key,conta:v.conta,data:TODAY}]:de}); },
-  `Fatura de ${keyLabel(key)}: ${brl(fatTotal(card.id,key))}. O valor sai do saldo do banco escolhido.`);
+    {id:"conta",label:"Pago com qual conta?",type:"select",options:[["","Escolha a conta…"],...S.contas.map(c=>[c.id,c.nome]),["fora","Paguei sem usar conta corrente"]],value:"",wide:true},
+    {id:"data",label:"Data do pagamento",type:"date",value:TODAY,wide:true}
+  ],"Marcar como paga",async v=>{
+    if(!v.conta) throw new Error("Escolha de qual conta saiu o pagamento.");
+    const data=need(v.data,"Escolha a data do pagamento.");
+    await store.update("cartoes",card.id,{pagas:[...arr,key],pagasDe:v.conta!=="fora"?[...de,{key,conta:v.conta,data}]:[...de,{key,conta:"",data}]});
+  },
+  `Fatura de ${keyLabel(key)}: ${brl(fatTotal(card.id,key))}. O valor só sai da conta escolhida agora, quando você marcar como paga.`);
 }
 
 /* ---------- aba bancos ---------- */
@@ -1010,7 +1019,7 @@ function renderCards(){
       </div>
       <div class="body">
         <div class="fatnav"><button type="button" data-k="-1" aria-label="Fatura anterior">‹</button><div class="t"><b>Fatura de ${keyLabel(key)}</b><span class="hint">Fecha ${fmtDate(closeDate(c,key))} · vence ${fmtDate(dueDate(c,key))}</span></div><button type="button" data-k="1" aria-label="Próxima fatura">›</button></div>
-        <div class="fattotal"><span class="num neg">${brl(tot)}</span><span class="actions"><span class="chip ${st}">${STATUS_TXT[st]}${paidFrom?" com "+esc(contaNome(paidFrom.conta)):""}</span></span></div>
+        <div class="fattotal"><span class="num neg">${brl(tot)}</span><span class="actions"><span class="chip ${st}">${STATUS_TXT[st]}${paidFrom?(paidFrom.conta?" com "+esc(contaNome(paidFrom.conta)):"")+(paidFrom.data?" em "+fmtShort(paidFrom.data):""):""}</span></span></div>
         <div class="items"></div>
         <div class="foot"><span class="actions"><button class="btn sm" type="button" data-act="buy">Nova compra</button><button class="btn sm ghost" type="button" data-act="imp">Importar fatura</button></span></div>
       </div>`;
@@ -1221,7 +1230,7 @@ function confirmFixaSheet(f,key){
   const rec=f.tipo==="receita";
   openSheet(`${rec?"Confirmar recebimento":"Confirmar pagamento"}: ${f.descricao}`,[
     {id:"valor",label:"Valor deste mês (R$)",type:"money",value:cents(f.valor)},
-    {id:"data",label:"Data",type:"date",value:fixaDate(f,key)},
+    {id:"data",label:rec?"Data do recebimento":"Data do pagamento",type:"date",value:key===NOWKEY||key<NOWKEY?TODAY:fixaDate(f,key)},
     {id:"pay",label:rec?"Entrou em":"Pago com",type:"select",options:payOptions(!rec),value:f.cartao?"cartao:"+f.cartao:f.conta?"conta:"+f.conta:"",wide:true}
   ], "Confirmar", async v=>{
     const o={tipo:rec?"receita":"despesa",descricao:f.descricao,categoria:f.categoria,valor:money(v.valor,"Informe o valor deste mês."),data:need(v.data,"Escolha a data."),fixa:f.id,mes:key,criado:Date.now()};
