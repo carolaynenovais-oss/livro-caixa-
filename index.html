@@ -189,11 +189,22 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .plastic .bar{background:rgba(255,255,255,.25)}
 .plastic .bar i{background:#fff}
 .plastic .tag{background:rgba(255,255,255,.2);color:#fff}
+.plastic.light{color:#18242A}
+.plastic.light .bar{background:rgba(0,0,0,.15)}
+.plastic.light .bar i{background:#18242A}
+.plastic.light .tag{background:rgba(0,0,0,.1);color:#18242A}
+.swatches{display:flex;flex-wrap:wrap;gap:8px}
+.sw{position:relative;cursor:pointer}
+.sw input[type=radio]{position:absolute;opacity:0;pointer-events:none}
+.sw span{display:block;width:32px;height:32px;border-radius:9px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+.sw input:checked+span,.sw input:checked+input{outline:3px solid var(--accent);outline-offset:2px}
+.sw input:focus-visible+span{outline:3px solid var(--accent);outline-offset:2px}
+.sw input[type=color]{width:32px;height:32px;border:0;padding:0;border-radius:9px;background:none;cursor:pointer}
 .ccard .body{padding:14px 16px;display:grid;gap:10px}
 .fatnav{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .fatnav button{border:1px solid var(--line);background:transparent;width:30px;height:30px;border-radius:8px}
 .fatnav .t{text-align:center;display:grid}
-.fatnav .t b{text-transform:capitalize}
+.fatnav .t b{text-transform:none}
 .fattotal{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 .fattotal .num{font-size:1.3rem;font-weight:500}
 .items{display:grid;border-top:1px solid var(--line)}
@@ -471,7 +482,10 @@ const CATS = {
   despesa:["Moradia","Alimentação","Transporte","Contas","Assinaturas","Saúde","Educação","Lazer","Compras","Casa","Outros"],
   receita:["Salário","Freelance","Investimentos","Vendas","Outros"]
 };
-const CORES=[["1","Azul"],["2","Roxo"],["3","Verde-água"],["4","Laranja"],["5","Grafite"]];
+const CORES_HEX=[["#2F4BD6","Azul"],["#00A1E4","Azul-claro"],["#1B2A4A","Azul-marinho"],["#7A3FC4","Roxo"],["#820AD1","Roxo vivo"],["#D6336C","Rosa"],["#CC0000","Vermelho"],["#7A1F2B","Vinho"],["#EC7000","Laranja"],["#C2512E","Terracota"],["#F2C200","Amarelo"],["#C9A227","Dourado"],["#1E7F52","Verde"],["#0F7C86","Verde-água"],["#8C939A","Prata"],["#3B464C","Grafite"],["#111111","Preto"]];
+const CORES_ANTIGAS=[null,"#2F4BD6","#7A3FC4","#0F7C86","#C2512E","#3B464C"];
+const cardHex = c => typeof c.cor==="string" && c.cor.startsWith("#") ? c.cor : (CORES_ANTIGAS[c.cor]||"#2F4BD6");
+const isLight = h => { const n=parseInt(h.slice(1),16), r=n>>16&255, g=n>>8&255, b=n&255; return (0.299*r+0.587*g+0.114*b)/255>0.62; };
 const MESES=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 const brl = v => (v/100).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
 const sbrl = v => (v>0?"+ ":v<0?"− ":"")+brl(Math.abs(v));
@@ -973,8 +987,14 @@ function renderBanks(){
     a.innerHTML=`<div class="top2"><div><h3>${esc(c.nome)}${c.exemplo?' <span class="tag">exemplo</span>':""}</h3><span class="hint">Saldo hoje</span></div></div>
       <div class="saldo num ${s<0?"neg":""}">${brl(s)}</div>
       ${prev!==s?`<span class="hint">Com o que já está agendado: ${brl(prev)}</span>`:""}
+      <div class="actions bank-acts"></div>
       <div class="history" hidden></div>
       <div class="foot"></div>`;
+    const ba=a.querySelector(".bank-acts"), mk=(t,fn,ghost=true)=>{ const b=document.createElement("button"); b.type="button"; b.className="btn sm"+(ghost?" ghost":""); b.textContent=t; b.onclick=fn; ba.append(b); };
+    mk("Pix / pagamento",()=>pixSheet(c),false);
+    if(S.contas.length>1) mk("Transferir",()=>transfSheet(c.id));
+    mk("Guardar no cofrinho",()=>jarFromBankSheet(c));
+    if(S.emprestimos.some(l=>l.direcao==="peguei" && loanFalta(l)>0)) mk("Pagar empréstimo",()=>payLoanFromBankSheet(c));
     const H=bankHistory(c), hk="bk:"+c.id, h=a.querySelector(".history"); h.hidden=!openHist.has(hk);
     if(openHist.has(hk)){
       const shown=[...H].reverse().slice(0,80);
@@ -1023,9 +1043,9 @@ function renderCards(){
     const key=fatView[c.id], items=fatItems(c.id,key), tot=sum(items,p=>p.valor), st=fatStatus(c,key);
     const used=sum(P.filter(p=>p.card===c.id && !isPaid(c,p.key) && !(p.mov.virtual && p.key>ok)),p=>p.valor), disp=c.limite-used;
     const paidFrom=(c.pagasDe||[]).find(p=>p.key===key);
-    const a=document.createElement("article"); a.className="card ccard"; a.style.setProperty("--k",`var(--k${c.cor||1})`);
+    const a=document.createElement("article"); a.className="card ccard"; const hx=cardHex(c); a.style.setProperty("--k",hx);
     a.innerHTML=`
-      <div class="plastic">
+      <div class="plastic${isLight(hx)?" light":""}">
         <div><div class="nm">${esc(c.nome)}${c.exemplo?' <span class="tag">exemplo</span>':""}</div><div class="meta">Fecha dia ${c.fechamento} · vence dia ${c.vencimento}</div></div>
         <div class="lim"><span>Disponível <b class="num">${brl(disp)}</b></span><span>Limite ${brl(c.limite)}</span></div>
         <div class="bar"><i style="width:${Math.min(100,c.limite?used/c.limite*100:0).toFixed(1)}%"></i></div>
@@ -1212,16 +1232,52 @@ function adjustSheet(c){
     await store.update("contas",c.id,{ajustes:[...(c.ajustes||[]),{id:nid(),data:TODAY,valor:s-atual}]});
   }, `Hoje o app mostra ${brl(atual)}.`);
 }
-function transfSheet(){
-  openSheet("Transferir entre bancos",[
-    {id:"de",label:"De",type:"select",options:S.contas.map(c=>[c.id,c.nome]),value:S.contas[0]?.id},
-    {id:"para",label:"Para",type:"select",options:S.contas.map(c=>[c.id,c.nome]),value:S.contas[1]?.id},
+function transfSheet(deId){
+  const de=deId||S.contas[0]?.id, para=(S.contas.find(c=>c.id!==de)||{}).id;
+  openSheet("Transferir entre suas contas",[
+    {id:"de",label:"De",type:"select",options:S.contas.map(c=>[c.id,c.nome]),value:de},
+    {id:"para",label:"Para",type:"select",options:S.contas.map(c=>[c.id,c.nome]),value:para},
     {id:"valor",label:"Valor (R$)",type:"money"},
     {id:"data",label:"Data",type:"date",value:TODAY}
   ],"Transferir", async v=>{
     if(v.de===v.para) throw new Error("Escolha bancos diferentes.");
     await store.add("movs",{tipo:"transferencia",de:v.de,para:v.para,valor:money(v.valor,"Informe um valor maior que zero."),data:need(v.data,"Escolha a data."),descricao:"Transferência",categoria:"",criado:Date.now()});
   });
+}
+// Pix ou pagamento saindo direto de uma conta corrente
+function pixSheet(c){
+  openSheet(`Pix / pagamento: ${c.nome}`,[
+    {id:"desc",label:"Para quem ou o quê",ph:"Ex.: Pix para Maria, conta de água",wide:true},
+    {id:"valor",label:"Valor (R$)",type:"money"},
+    {id:"data",label:"Data",type:"date",value:TODAY},
+    {id:"cat",label:"Categoria",type:"select",options:catList("despesa"),value:"Outros",newCat:"despesa",wide:true}
+  ],"Registrar", async v=>{
+    await store.add("movs",{tipo:"despesa",descricao:need(v.desc,"Escreva para quem foi ou o que pagou."),valor:money(v.valor,"Informe um valor maior que zero."),categoria:v.cat,data:need(v.data,"Escolha a data."),conta:c.id,forma:"",cartao:"",criado:Date.now()});
+  }, `O valor sai do saldo da ${c.nome}. Se for dinheiro emprestado para alguém, use a aba Empréstimos para acompanhar a devolução.`);
+}
+function jarFromBankSheet(c){
+  if(!S.cofrinhos.length){ $("expMsg").textContent="Crie um cofrinho primeiro, na aba Cofrinhos."; go("cofrinhos"); return; }
+  openSheet(`Guardar no cofrinho: ${c.nome}`,[
+    {id:"jar",label:"Qual cofrinho?",type:"select",options:S.cofrinhos.map(j=>[j.id,`${j.nome} (tem ${brl(jarSaldo(j))})`]),value:S.cofrinhos[0].id,wide:true},
+    {id:"valor",label:"Valor (R$)",type:"money"},
+    {id:"data",label:"Data",type:"date",value:TODAY}
+  ],"Guardar", async v=>{
+    const j=S.cofrinhos.find(x=>x.id===v.jar), valor=money(v.valor,"Informe um valor maior que zero.");
+    await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo:"guardar",valor,data:need(v.data,"Escolha a data."),conta:c.id}]});
+  }, `Sai da ${c.nome} (saldo hoje ${brl(bankSaldo(c,bankFlows(TODAY)))}) e vai para o cofrinho.`);
+}
+function payLoanFromBankSheet(c){
+  const ls=S.emprestimos.filter(l=>l.direcao==="peguei" && loanFalta(l)>0);
+  if(!ls.length){ $("expMsg").textContent="Você não tem empréstimo pegado em aberto."; return; }
+  openSheet(`Pagar empréstimo: ${c.nome}`,[
+    {id:"loan",label:"Qual empréstimo?",type:"select",options:ls.map(l=>[l.id,`${l.pessoa}: falta ${brl(loanFalta(l))}`]),value:ls[0].id,wide:true},
+    {id:"valor",label:"Valor pago (R$)",type:"money",value:cents(loanFalta(ls[0]))},
+    {id:"data",label:"Data",type:"date",value:TODAY}
+  ],"Registrar pagamento", async v=>{
+    const l=S.emprestimos.find(x=>x.id===v.loan), valor=money(v.valor,"Informe um valor maior que zero.");
+    if(valor>loanFalta(l)) throw new Error(`Para ${l.pessoa} falta só ${brl(loanFalta(l))}. Informe até esse valor.`);
+    await store.update("emprestimos",l.id,{pagamentos:[...(l.pagamentos||[]),{id:nid(),valor,data:need(v.data,"Escolha a data."),conta:c.id}]});
+  }, `O pagamento sai da ${c.nome}.`);
 }
 function fixaSheet(f){
   const cats=[...new Set([...catList("despesa"),...catList("receita")])];
@@ -1260,19 +1316,22 @@ function budgetSheet(){
     await store.setCfg({orcamentos:out});
   }, "Deixe vazio as categorias sem limite. Você recebe um aviso quando passar de 80% do limite.");
 }
+function bindCustomColor(){ const cc=$("corCustom"); if(!cc) return; cc.addEventListener("input",()=>{ const r=document.querySelector('#shFields input[name=cor][value=custom]'); if(r) r.checked=true; }); cc.addEventListener("click",()=>{ const r=document.querySelector('#shFields input[name=cor][value=custom]'); if(r) r.checked=true; }); }
 function cardSheet(c){
   openSheet(c?"Editar cartão":"Novo cartão",[
     {id:"nome",label:"Nome do cartão",value:c?.nome,ph:"Ex.: Nubank",wide:true},
     {id:"limite",label:"Limite (R$)",type:"money",value:cents(c?.limite)},
-    {id:"cor",label:"Cor",type:"select",options:CORES,value:c?.cor||1},
+    {type:"html",html:(()=>{ const cur=c?cardHex(c):CORES_HEX[0][0], custom=!CORES_HEX.some(x=>x[0]===cur);
+      return `<div class="f wide"><span class="label">Cor do cartão</span><div class="swatches" role="radiogroup" aria-label="Cor do cartão">${CORES_HEX.map(([h,n])=>`<label class="sw" title="${n}"><input type="radio" name="cor" value="${h}" ${cur===h?"checked":""} aria-label="${n}"><span style="background:${h}"></span></label>`).join("")}<label class="sw" title="Escolher outra cor"><input type="radio" name="cor" value="custom" ${custom?"checked":""} aria-label="Outra cor"><input type="color" id="corCustom" value="${custom?cur:"#5B8DEF"}" aria-label="Escolher outra cor"></label></div><span class="help">O último quadrado abre a paleta para escolher qualquer cor.</span></div>`; })()},
     {id:"fech",label:"Dia de fechamento",type:"day",value:c?.fechamento,help:"Compras a partir deste dia vão para a fatura seguinte."},
     {id:"venc",label:"Dia de vencimento",type:"day",value:c?.vencimento,help:"Dia em que você paga a fatura."}
   ], c?"Salvar":"Cadastrar cartão", async v=>{
     const o={nome:need(v.nome,"Dê um nome ao cartão, como “Nubank”."),limite:money(v.limite,"Informe o limite do cartão, como 3.000,00."),
-      fechamento:dia(v.fech,"O dia de fechamento precisa ser de 1 a 31."),vencimento:dia(v.venc,"O dia de vencimento precisa ser de 1 a 31."),cor:+v.cor};
+      fechamento:dia(v.fech,"O dia de fechamento precisa ser de 1 a 31."),vencimento:dia(v.venc,"O dia de vencimento precisa ser de 1 a 31."),cor:(()=>{ const r=document.querySelector("#shFields input[name=cor]:checked"); return !r?CORES_HEX[0][0]:r.value==="custom"?$("corCustom").value:r.value; })()};
     if(o.fechamento===o.vencimento) throw new Error("O fechamento e o vencimento precisam ser em dias diferentes.");
     if(c) await store.update("cartoes",c.id,o); else { o.pagas=[]; o.pagasDe=[]; o.criado=Date.now(); await store.add("cartoes",o); }
   });
+  bindCustomColor();
 }
 function compraSheet(c){
   openSheet(`Nova compra no ${c.nome}`,[
