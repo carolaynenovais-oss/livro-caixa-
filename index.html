@@ -612,7 +612,7 @@ const contaById = id => S.contas.find(c=>c.id===id);
 const contaNome = id => !id ? "" : String(id).startsWith("cofre:") ? "Cofrinho "+(S.cofrinhos.find(j=>"cofre:"+j.id===id)?.nome||"excluído") : (contaById(id)?.nome || "Banco excluído");
 const isJarSrc = id => String(id||"").startsWith("cofre:");
 // empréstimos podem sair de (ou voltar para) um banco ou um cofrinho
-const loanSrcOptions = () => [...bankOptions(),...S.cofrinhos.map(j=>["cofre:"+j.id,"Cofrinho: "+j.nome])];
+const loanSrcOptions = (vazio) => [...bankOptions(vazio),...S.cofrinhos.map(j=>["cofre:"+j.id,"Cofrinho: "+j.nome])];
 function payOptions(cards){ const o=[["","Nenhuma conta (não mexe em saldo)"]]; S.contas.forEach(c=>o.push(["conta:"+c.id,c.nome])); if(cards) S.cartoes.forEach(c=>o.push(["cartao:"+c.id,"Cartão "+c.nome])); return o; }
 const bankOptions = (vazio="Nenhuma conta (não mexe em saldo)") => [["",vazio],...S.contas.map(c=>[c.id,c.nome])];
 const payValue = m => m.forma==="cartao" ? "cartao:"+m.cartao : m.conta ? "conta:"+m.conta : "";
@@ -951,12 +951,12 @@ function renderLedger(L){
       dayEl=document.createElement("div"); dayEl.className="day";
       dayEl.innerHTML=`<span>${new Date(yy,mm-1,dd).toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</span><span class="num"></span>`;
       el.append(dayEl); }
-    if(x.g!=="transf") ds+=x.v;
+    if(x.g!=="transf" && !x.jar) ds+=x.v;
     const r=document.createElement("div"); r.className="row"; r.style.setProperty("--c",GCOL[x.g]);
     let extra="";
     if(x.fatura){ const st=fatStatus(x.card,x.key); extra=` <span class="chip ${st}">${STATUS_TXT[st]}</span>`; }
     const valTxt = x.g==="transf" ? "⇄ "+brl(x.v) : sbrl(x.v);
-    r.innerHTML=`<span class="stripe"></span><span class="desc"><b>${esc(x.desc)}</b><small>${esc(x.sub)}${extra}${x.tag?`<span class="tag">${x.tag}</span>`:""}${x.ex?'<span class="tag">exemplo</span>':""}</small></span><span class="val num ${x.g==="transf"?"":x.v>=0?"pos":"neg"}">${valTxt}</span><span class="act"></span>`;
+    r.innerHTML=`<span class="stripe"></span><span class="desc"><b>${esc(x.desc)}</b><small>${esc(x.sub)}${extra}${x.tag?`<span class="tag">${x.tag}</span>`:""}${x.jar?'<span class="tag" style="background:var(--bg);color:var(--muted)">não conta no mês</span>':""}${x.ex?'<span class="tag">exemplo</span>':""}</small></span><span class="val num ${x.g==="transf"?"":x.v>=0?"pos":"neg"}">${valTxt}</span><span class="act"></span>`;
     const act=r.lastChild;
     if(x.fatura){ if(!preHist(x.card,x.key)) act.append(linkBtn(isPaid(x.card,x.key)?"Desmarcar":"Marcar paga",()=>payFatura(x.card,x.key))); }
     else if(x.goLoan){ act.append(linkBtn("Ver",()=>go("emprestimos"))); }
@@ -1457,7 +1457,7 @@ function loanSheet(l){
     {id:"total",label:"Total a devolver (opcional)",type:"money",value:l&&l.aReceber!==l.valor?cents(l.aReceber):"",help:"Preencha se houver juros."},
     {id:"data",label:"Data",type:"date",value:l?.data||TODAY},
     {id:"prev",label:"Combinado até (opcional)",type:"date",value:l?.previsao||""},
-    {id:"conta",label:"Saiu de / entrou em",type:"select",options:loanSrcOptions(),value:l?l.conta||"":"",help:"Banco ou cofrinho de onde o dinheiro saiu (ou para onde entrou)."},
+    {id:"conta",label:"Saiu de / entrou em",type:"select",options:loanSrcOptions("Não sei / não lembro (só registra a dívida)"),value:l?l.conta||"":"",help:"Banco ou cofrinho de onde o dinheiro saiu (ou para onde entrou)."},
     {id:"obs",label:"Observação (opcional)",value:l?.obs,ph:"Ex.: em 3 vezes"}
   ], l?"Salvar":"Registrar", async v=>{
     const valor=money(v.valor,"Informe o valor do empréstimo.");
@@ -1477,7 +1477,7 @@ function payLoanSheet(l){
   openSheet(out?`Recebimento de ${l.pessoa}`:`Pagamento para ${l.pessoa}`,[
     {id:"valor",label:"Valor (R$)",type:"money",help:`Falta ${brl(loanFalta(l))}.`},
     {id:"data",label:"Data",type:"date",value:TODAY},
-    {id:"conta",label:out?"Entrou em (banco ou cofrinho)":"Saiu de (banco ou cofrinho)",type:"select",options:loanSrcOptions(),value:"",wide:true}
+    {id:"conta",label:out?"Entrou em (banco ou cofrinho)":"Saiu de (banco ou cofrinho)",type:"select",options:loanSrcOptions("Não sei / não lembro (só desconta da dívida)"),value:"",wide:true,help:"Se não lembra para onde foi o dinheiro, deixe assim. O valor só sai da dívida e não mexe em conta, cofrinho nem no mês."}
   ],"Registrar", async v=>{
     const valor=money(v.valor,"Informe um valor maior que zero.");
     if(valor>loanFalta(l)) throw new Error(`Falta só ${brl(loanFalta(l))}. Informe até esse valor.`);
