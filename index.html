@@ -632,13 +632,18 @@ function bankFlows(limit){
     (l.pagamentos||[]).forEach(p=>{ if(p.data<=limit) add(p.conta, out?p.valor:-p.valor); }); });
   return f;
 }
-const bankSaldo = (c,F,limit=TODAY) => (c.saldoInicial||0)+sum((c.ajustes||[]).filter(a=>a.data<=limit),a=>a.valor)+(F[c.id]||0);
+// dia do saldo informado: fim do dia escolhido (ou o dia anterior ao cadastro, nas contas antigas)
+const dayBefore = d => { const x=new Date(d+"T12:00:00"); x.setDate(x.getDate()-1); return iso(x); };
+const anchorDate = c => c.saldoData || "";
+let _flowMemo={};
+const flowsAt = limit => _flowMemo[limit] || (_flowMemo[limit]=bankFlows(limit));
+const bankSaldo = (c,F,limit=TODAY) => (c.saldoInicial||0)+sum((c.ajustes||[]).filter(a=>a.data<=limit),a=>a.valor)+(F[c.id]||0)-(anchorDate(c)?(flowsAt(anchorDate(c))[c.id]||0):0);
 const bankTotalAt = limit => { const F=bankFlows(limit); return sum(S.contas,c=>bankSaldo(c,F,limit)); };
 // extrato da conta corrente: de onde veio e para onde foi cada valor, com o saldo depois de cada um
 function bankHistory(c){
-  const id=c.id, H=[{data:"",desc:"Saldo quando a conta foi cadastrada",sub:c.criado?fmtDate(iso(new Date(c.criado))):"Saldo inicial",v:c.saldoInicial||0,ini:true}];
-  const add=(data,desc,sub,v)=>{ if(v && data) H.push({data,desc,sub,v}); };
-  (c.ajustes||[]).forEach(a=>add(a.data,"Ajuste de saldo","Para igualar com o app do banco",a.valor));
+  const id=c.id, H=[], anc=anchorDate(c);
+  const add=(data,desc,sub,v,aj)=>{ if(v && data) H.push({data,desc,sub,v,aj}); };
+  (c.ajustes||[]).forEach(a=>add(a.data,"Ajuste de saldo","Para igualar com o app do banco",a.valor,true));
   S.movs.forEach(m=>{ if(!m.data) return;
     if(m.tipo==="receita"){ if(m.conta===id) add(m.data,m.descricao,"Receita · "+m.categoria,m.valor); }
     else if(m.tipo==="transferencia"){ if(m.de===id) add(m.data,`Transferência para ${contaNome(m.para)}`,"Entre suas contas",-m.valor); if(m.para===id) add(m.data,`Transferência de ${contaNome(m.de)}`,"Entre suas contas",m.valor); }
@@ -649,6 +654,9 @@ function bankHistory(c){
   S.emprestimos.forEach(l=>{ const out=l.direcao!=="peguei";
     if(l.conta===id) add(l.data,out?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,"Empréstimo",out?-l.valor:l.valor);
     (l.pagamentos||[]).forEach(q=>{ if(q.conta===id) add(q.data,out?`${l.pessoa} devolveu`:`Pagamento para ${l.pessoa}`,"Empréstimo",out?q.valor:-q.valor); }); });
+  // o saldo informado vale para o fim do dia "anc": o que veio antes já estava dentro dele
+  const antes=sum(H.filter(h=>!h.aj && anc && h.data<=anc),h=>h.v);
+  H.push({data:"",ini:true,desc:anc?`Saldo antes dos lançamentos`:"Saldo informado no cadastro",sub:anc?`Calculado a partir do saldo de ${brl(c.saldoInicial||0)} no fim de ${fmtDate(anc)}`:"Saldo inicial",v:(c.saldoInicial||0)-antes});
   H.sort((a,b)=>a.data.localeCompare(b.data)); let run=0; H.forEach(h=>{ run+=h.v; h.saldo=run; });
   return H;
 }
@@ -709,7 +717,7 @@ const fixaPay = f => f.cartao ? "Cartão "+(cardById(f.cartao)?.nome||"") : cont
 function jarLoanMovs(j){
   const k="cofre:"+j.id, out=[];
   S.emprestimos.forEach(l=>{ const emp=l.direcao!=="peguei";
-    if(l.conta===k) out.push({data:l.data,valor:emp?-l.valor:l.valor,desc:emp?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`});
+    if(l.conta===k) out.push({data:l.data,valor:emp?-l.valor:l.valor,desc:emp?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,obs:String(l.obs||"").replace(/^Saiu do cofrinho [^·]*(· )?/,"").trim()});
     (l.pagamentos||[]).forEach(p=>{ if(p.conta===k) out.push({data:p.data,valor:emp?p.valor:-p.valor,desc:emp?`${l.pessoa} devolveu`:`Pago para ${l.pessoa}`}); });
   });
   return out;
@@ -741,10 +749,10 @@ function monthLines(y,m){
   }));
   S.emprestimos.forEach(l=>{
     const out=l.direcao!=="peguei";
-    if(inM(l.data)) L.push({data:l.data,g:"emprestimo",desc:out?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,sub:["Empréstimo",contaNome(l.conta)].filter(Boolean).join(" · "),v:out?-l.valor:l.valor,ex:l.exemplo,goLoan:true,jar:isJarSrc(l.conta)});
+    if(inM(l.data)) L.push({data:l.data,g:"emprestimo",desc:out?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,sub:["Empréstimo",contaNome(l.conta)].filter(Boolean).join(" · "),v:out?-l.valor:l.valor,ex:l.exemplo,goLoan:true,jar:!l.conta||isJarSrc(l.conta)});
     (l.pagamentos||[]).forEach(p=>{ if(!inM(p.data)) return;
       const ab=p.tipo==="abatimento";
-      L.push({data:p.data,g:"emprestimo",desc:ab?`${l.pessoa}: abatido com outra dívida`:out?`${l.pessoa} devolveu`:`Pagamento para ${l.pessoa}`,sub:ab?"Empréstimo · abatimento, sem dinheiro movimentado":["Empréstimo",contaNome(p.conta)].filter(Boolean).join(" · "),v:out?p.valor:-p.valor,ex:l.exemplo,loanPay:[l,p],jar:ab||isJarSrc(p.conta)}); });
+      L.push({data:p.data,g:"emprestimo",desc:ab?`${l.pessoa}: abatido com outra dívida`:out?`${l.pessoa} devolveu`:`Pagamento para ${l.pessoa}`,sub:ab?"Empréstimo · abatimento, sem dinheiro movimentado":["Empréstimo",contaNome(p.conta)].filter(Boolean).join(" · "),v:out?p.valor:-p.valor,ex:l.exemplo,loanPay:[l,p],jar:ab||!p.conta||isJarSrc(p.conta)}); });
   });
   return L;
 }
@@ -764,6 +772,7 @@ const budgetColor = r => r>1 ? "var(--out)" : r>=.8 ? "var(--loan)" : "var(--in)
 
 /* ---------- render ---------- */
 function render(){
+  _flowMemo={};
   buildParcelas();
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===tab));
   TABS.forEach(t=>$("p-"+t).hidden=t!==tab);
@@ -1011,7 +1020,7 @@ function renderBanks(){
       const shown=[...H].reverse().slice(0,80);
       h.innerHTML=`<div class="item" style="grid-template-columns:1fr auto;font-size:.75rem;color:var(--muted)"><span>Movimento</span><span>Valor · saldo depois</span></div>`+shown.map(x=>`<div class="item bh"><span><b>${esc(x.desc)}</b><small>${x.ini?esc(x.sub):fmtDate(x.data)+" · "+esc(x.sub)}${x.data>TODAY?' <span class="chip aberta">Agendado</span>':""}</small></span><span class="num ${x.v<0?"neg":"pos"}">${sbrl(x.v)}</span><span class="num hint">${brl(x.saldo)}</span></div>`).join("")+(H.length>80?`<p class="hint" style="margin:8px 0 0">Mostrando os 80 movimentos mais recentes. A planilha tem todos.</p>`:"");
     }
-    a.querySelector(".foot").append(linkBtn(openHist.has(hk)?"Esconder extrato":`Ver extrato (${H.length})`,()=>{ openHist.has(hk)?openHist.delete(hk):openHist.add(hk); render(); }),linkBtn("Ajustar saldo",()=>adjustSheet(c)),linkBtn("Renomear",()=>bankSheet(c)),delBtn("bank:"+c.id,"Excluir",()=>store.remove("contas",c.id),"Confirmar exclusão"));
+    a.querySelector(".foot").append(linkBtn(openHist.has(hk)?"Esconder extrato":`Ver extrato (${H.length})`,()=>{ openHist.has(hk)?openHist.delete(hk):openHist.add(hk); render(); }),linkBtn("Ajustar saldo",()=>adjustSheet(c)),linkBtn("Editar saldo inicial",()=>bankSheet(c)),delBtn("bank:"+c.id,"Excluir",()=>store.remove("contas",c.id),"Confirmar exclusão"));
     el.append(a);
   });
 }
@@ -1107,11 +1116,11 @@ function renderJars(){
     const h=a.querySelector(".history"), mv=[...(j.movs||[])].sort((x,y)=>y.data.localeCompare(x.data));
     h.hidden=!openHist.has(j.id);
     mv.forEach(x=>{ const it=document.createElement("div"); it.className="item";
-      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${x.tipo==="guardar"?"Guardado":"Retirado"} <small>${x.conta?esc(contaNome(x.conta)):x.tipo==="guardar"?"sem sair de conta":"sem ir para conta"}</small></span><span class="num ${x.tipo==="guardar"?"pos":"neg"}">${x.tipo==="guardar"?"+":"−"} ${brl(x.valor)}</span><span></span>`;
+      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${x.tipo==="guardar"?"Guardado":"Retirado"} <small>${x.conta?esc(contaNome(x.conta)):x.tipo==="guardar"?"sem sair de conta":"sem ir para conta"}${x.obs?` · ${esc(x.obs)}`:""}</small></span><span class="num ${x.tipo==="guardar"?"pos":"neg"}">${x.tipo==="guardar"?"+":"−"} ${brl(x.valor)}</span><span></span>`;
       it.lastChild.append(delBtn("s:"+x.id,"Excluir",()=>store.update("cofrinhos",j.id,{movs:(j.movs||[]).filter(i=>i.id!==x.id)}))); h.append(it); });
     const lm=jarLoanMovs(j).sort((x,y)=>y.data.localeCompare(x.data));
     lm.forEach(x=>{ const it=document.createElement("div"); it.className="item";
-      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${esc(x.desc)} <small>Empréstimo</small></span><span class="num ${x.valor>0?"pos":"neg"}">${sbrl(x.valor)}</span><span></span>`;
+      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${esc(x.desc)} <small>Empréstimo${x.obs?` · ${esc(x.obs)}`:""}</small></span><span class="num ${x.valor>0?"pos":"neg"}">${sbrl(x.valor)}</span><span></span>`;
       it.lastChild.append(linkBtn("Ver",()=>go("emprestimos"))); h.append(it); });
     if(lm.length) a.querySelector(".top2 .hint").textContent+=` · inclui ${lm.length} movimento${lm.length>1?"s":""} de empréstimo`;
     const f=a.querySelector(".foot");
@@ -1259,15 +1268,17 @@ function movSheet(m){
   });
 }
 function bankSheet(c){
-  openSheet(c?"Renomear banco":"Novo banco",[
+  openSheet(c?"Editar conta":"Nova conta corrente",[
     {id:"nome",label:"Nome",value:c?.nome,ph:"Ex.: Nubank, Caixa, Carteira",wide:true},
-    ...(c?[]:[{id:"saldo",label:"Saldo de hoje (R$)",type:"money",wide:true,help:"Quanto tem nessa conta agora. Pode ser 0."}])
-  ], c?"Salvar":"Cadastrar banco", async v=>{
+    {id:"saldo",label:"Saldo (R$)",type:"money",value:c?(cents(c.saldoInicial)||"0,00"):"",help:"Pode ser 0 ou negativo."},
+    {id:"sdata",label:"Esse era o saldo no fim de qual dia? (opcional)",type:"date",value:c?anchorDate(c):"",help:"Deixe em branco se esse saldo é de antes de todos os lançamentos. Se escolher um dia, só o que vier depois dele muda o saldo."}
+  ], c?"Salvar":"Cadastrar conta", async v=>{
     const nome=need(v.nome,"Dê um nome, como “Nubank” ou “Carteira”.");
-    if(c) return store.update("contas",c.id,{nome});
     const s=v.saldo?parseValor(v.saldo,true):0; if(s===null) throw new Error("Informe o saldo, como 1.250,00 ou -80,00.");
-    await store.add("contas",{nome,saldoInicial:s,criado:Date.now()});
-  });
+    const sdata=v.sdata||"";
+    if(c) return store.update("contas",c.id,{nome,saldoInicial:s,saldoData:sdata});
+    await store.add("contas",{nome,saldoInicial:s,saldoData:sdata,ajustes:[],criado:Date.now()});
+  }, c?"Exemplo: se vai lançar outubro inteiro, coloque o saldo que tinha no fim de 30/09 e escolha 30/09.":"Exemplo: para lançar outubro inteiro, coloque o saldo do fim de 30/09 e escolha 30/09. Para começar de hoje, deixe o saldo de ontem.");
 }
 function adjustSheet(c){
   const F=bankFlows(TODAY), atual=bankSaldo(c,F);
@@ -1409,10 +1420,11 @@ function jarMovSheet(j,tipo,emprestar){
   if(tipo==="guardar") return openSheet(`Guardar em ${j.nome}`,[
     {id:"valor",label:"Valor (R$)",type:"money"},
     {id:"data",label:"Data",type:"date",value:TODAY},
-    {id:"conta",label:"De onde veio esse dinheiro?",type:"select",options:bankOptions("Não saiu de conta (ex.: dinheiro que recebi direto)"),value:"",wide:true,help:"Só desconta de uma conta corrente se você escolher a conta aqui."}
+    {id:"conta",label:"De onde veio esse dinheiro?",type:"select",options:bankOptions("Não saiu de conta (ex.: dinheiro que recebi direto)"),value:"",wide:true,help:"Só desconta de uma conta corrente se você escolher a conta aqui."},
+    {id:"obs",label:"Observação (opcional)",ph:"Ex.: sobra do salário, presente de aniversário",wide:true}
   ],"Guardar", async v=>{
     const valor=money(v.valor,"Informe um valor maior que zero.");
-    await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo,valor,data:need(v.data,"Escolha a data."),conta:v.conta}]});
+    await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo,valor,data:need(v.data,"Escolha a data."),conta:v.conta,obs:v.obs||""}]});
   });
   // retirada: volta para um banco OU vira um empréstimo para alguém
   openSheet(emprestar?`Emprestar do cofrinho ${j.nome}`:`Retirar de ${j.nome}`,[
@@ -1421,7 +1433,8 @@ function jarMovSheet(j,tipo,emprestar){
     {id:"destino",label:"Para onde foi o dinheiro?",type:"select",options:[...bankOptions().map(([v,l])=>[v,v?`Voltou para ${l}`:"Não foi para conta (ex.: usei em dinheiro)"]),["emprestimo","Emprestei para alguém"]],value:emprestar?"emprestimo":"",wide:true},
     {id:"pessoa",label:"Para quem? (se emprestou)",ph:"Ex.: João",wide:true,sugestoes:nomesPessoas()},
     {id:"total",label:"Total a devolver (opcional)",type:"money",help:"Preencha se houver juros."},
-    {id:"prev",label:"Combinado até (opcional)",type:"date",value:""}
+    {id:"prev",label:"Combinado até (opcional)",type:"date",value:""},
+    {id:"obs",label:"Observação: por que pegou / para quê (opcional)",ph:"Ex.: conserto do carro, passagem, pagar em 3x",wide:true}
   ], emprestar?"Registrar empréstimo":"Retirar", async v=>{
     const valor=money(v.valor,"Informe um valor maior que zero."), data=need(v.data,"Escolha a data.");
     if(valor>jarSaldo(j)) throw new Error(`Este cofrinho tem ${brl(jarSaldo(j))}. Retire até esse valor.`);
@@ -1429,10 +1442,10 @@ function jarMovSheet(j,tipo,emprestar){
       const pessoa=need(v.pessoa,"Escreva para quem você emprestou.");
       const total=money(v.total,"O total a devolver precisa ser um valor maior que zero.",true)||valor;
       if(total<valor) throw new Error("O total a devolver não pode ser menor que o valor emprestado.");
-      await store.add("emprestimos",{direcao:"emprestei",pessoa,valor,aReceber:total,data,previsao:v.prev||"",obs:`Saiu do cofrinho ${j.nome}`,conta:"cofre:"+j.id,pagamentos:[],criado:Date.now()});
+      await store.add("emprestimos",{direcao:"emprestei",pessoa,valor,aReceber:total,data,previsao:v.prev||"",obs:[`Saiu do cofrinho ${j.nome}`,v.obs].filter(Boolean).join(" · "),conta:"cofre:"+j.id,pagamentos:[],criado:Date.now()});
       $("expMsg").textContent=`Empréstimo para ${pessoa} registrado. Quando devolver, use "Registrar recebimento" e escolha o cofrinho.`;
     } else {
-      await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo:"resgatar",valor,data,conta:v.destino}]});
+      await store.update("cofrinhos",j.id,{movs:[...(j.movs||[]),{id:nid(),tipo:"resgatar",valor,data,conta:v.destino,obs:v.obs||""}]});
     }
   }, `Saldo do cofrinho: ${brl(jarSaldo(j))}.`);
 }
