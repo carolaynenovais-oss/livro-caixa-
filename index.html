@@ -961,8 +961,8 @@ const fixaPay = f => f.tipo==="cofrinho" ? `${f.conta?"Da "+contaNome(f.conta):"
 function jarLoanMovs(j){
   const k="cofre:"+j.id, out=[];
   S.emprestimos.forEach(l=>{ const emp=l.direcao!=="peguei";
-    if(l.conta===k) out.push({data:l.data,valor:emp?-l.valor:l.valor,desc:emp?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,obs:String(l.obs||"").replace(/^Saiu do cofrinho [^·]*(· )?/,"").trim()});
-    (l.pagamentos||[]).forEach(p=>{ if(p.conta===k) out.push({data:p.data,valor:emp?p.valor:-p.valor,desc:emp?`${l.pessoa} devolveu`:`Pago para ${l.pessoa}`}); });
+    if(l.conta===k) out.push({l,data:l.data,valor:emp?-l.valor:l.valor,desc:emp?`Emprestado para ${l.pessoa}`:`Empréstimo de ${l.pessoa}`,obs:String(l.obs||"").replace(/^Saiu do cofrinho [^·]*(· )?/,"").trim()});
+    (l.pagamentos||[]).forEach(p=>{ if(p.conta===k) out.push({l,p,data:p.data,valor:emp?p.valor:-p.valor,desc:emp?`${l.pessoa} devolveu`:`Pago para ${l.pessoa}`}); });
   });
   return out;
 }
@@ -1328,7 +1328,7 @@ function renderBankStatement(c){
   const w=document.createElement("div"); w.className="page"; w.style.cssText="grid-column:1/-1;gap:14px";
   const ini=bankMonth+"-01", fut=bankMonth>=NOWKEY;
   const start=sum(H.filter(h=>h.ini||h.data<ini),h=>h.v), mes=H.filter(h=>!h.ini&&h.data.startsWith(bankMonth));
-  const ent=sum(mes.filter(h=>h.v>0),h=>h.v), sai=-sum(mes.filter(h=>h.v<0),h=>h.v);
+  const ent=sum(mes.filter(h=>h.v>0),h=>h.v), sai=0-sum(mes.filter(h=>h.v<0),h=>h.v);
   w.innerHTML=`<div><button class="link" type="button" id="bkBack">‹ Todas as contas</button></div>
     <div class="card bank" style="--k:var(--c-conta)"><div class="top2"><div><h3>${esc(c.nome)}</h3><span class="hint">Saldo hoje</span></div></div><div class="saldo num ${s<0?"neg":""}">${brl(s)}</div><div class="actions bank-acts"></div><div class="foot"></div></div>
     <div class="sec-head"><nav class="month" aria-label="Mês do extrato"><button type="button" id="bkPrev" aria-label="Mês anterior">‹</button><span>${bankAll?"Tudo":keyLabel(bankMonth)}</span><button type="button" id="bkNext" aria-label="Próximo mês">›</button></nav>
@@ -1409,7 +1409,8 @@ function loanPayEditSheet(l,p){
     {id:"conta",label:out?"Entrou em":"Saiu de",type:"select",options:loanSrcOptions("Não sei / não lembro (só desconta da dívida)"),value:p.conta||"",wide:true}
   ],"Salvar", async v=>{ const valor=money(v.valor,"Informe um valor maior que zero."), max=loanFalta(l)+p.valor;
     if(valor>max) throw new Error(`Esse empréstimo aceita até ${brl(max)} neste pagamento.`);
-    await store.update("emprestimos",l.id,{pagamentos:(l.pagamentos||[]).map(i=>i.id===p.id?{...i,valor,data:need(v.data,"Escolha a data."),conta:v.conta}:i)}); });
+    await store.update("emprestimos",l.id,{pagamentos:(l.pagamentos||[]).map(i=>i.id===p.id?{...i,valor,data:need(v.data,"Escolha a data."),conta:v.conta}:i)});
+    if(isJarSrc(v.conta) && v.conta!==p.conta) setTimeout(()=>dupJarSheet(v.conta,out?"guardar":"retirar",valor,l.pessoa),0); });
 }
 function ajusteEditSheet(c,a){
   openSheet("Editar ajuste de saldo",[
@@ -1519,8 +1520,66 @@ function renderCards(){
 }
 
 /* ---------- aba cofrinhos ---------- */
+/* ---------- extrato do cofrinho (igual ao da conta corrente) ---------- */
+let jarView=null, jarMonth=NOWKEY, jarAll=false, jarQ="", jarQFocus=false;
+function openJar(id){ jarView=id; jarMonth=NOWKEY; jarAll=false; jarQ=""; pending=null; render(); window.scrollTo(0,0); }
+function jarHistory(j){
+  const t=[...(j.movs||[]).map((x,i)=>{ const g=x.tipo==="guardar";
+      return {data:x.data,v:g?x.valor:-x.valor,o:i,desc:g?"Guardado":"Retirado",sub:[x.conta?(g?"Da ":"Para ")+contaNome(x.conta):g?"Não saiu de conta":"Não foi para conta",x.fixa?"Todo mês":"",x.obs].filter(Boolean).join(" · "),ref:{k:"jar",j,x}}; }),
+    ...jarLoanMovs(j).map((x,i)=>({data:x.data,v:x.valor,o:1e6+i,desc:x.desc,sub:["Empréstimo",x.obs].filter(Boolean).join(" · "),ref:x.p?{k:"loanpay",l:x.l,p:x.p}:{k:"loan",l:x.l}}))]
+    .sort((a,b)=>a.data.localeCompare(b.data)||a.o-b.o);
+  let c=0; t.forEach(h=>{ c+=h.v; h.saldo=c; }); return t;
+}
+function renderJarStatement(j){
+  const el=$("jarsList"), s=jarSaldo(j), H=jarHistory(j);
+  $("jarTotal").textContent="";
+  const w=document.createElement("div"); w.className="page"; w.style.cssText="grid-column:1/-1;gap:14px";
+  const ini=jarMonth+"-01", fut=jarMonth>=NOWKEY;
+  const start=sum(H.filter(h=>h.data<ini),h=>h.v), mes=H.filter(h=>h.data.startsWith(jarMonth));
+  const ent=sum(mes.filter(h=>h.v>0),h=>h.v), sai=0-sum(mes.filter(h=>h.v<0),h=>h.v);
+  w.innerHTML=`<div><button class="link" type="button" id="jxBack">‹ Todos os cofrinhos</button></div>
+    <div class="card jar"><div class="top2"><div><h3>${esc(j.nome)}</h3><span class="hint">${j.meta?`Meta ${brl(j.meta)} · faltam ${brl(Math.max(0,j.meta-s))}`:"Guardado hoje"}</span></div><span class="saldo num">${brl(s)}</span></div>
+      ${j.meta?`<div class="bar" style="--c:var(--save)"><i style="width:${Math.min(100,s/j.meta*100).toFixed(1)}%"></i></div>`:""}
+      <div class="actions"><button class="btn sm" type="button" data-a="g">Guardar</button><button class="btn sm ghost" type="button" data-a="r">Retirar</button><button class="btn sm ghost" type="button" data-a="e">Emprestar daqui</button><button class="btn sm ghost" type="button" data-a="m">Todo mês</button></div>
+      <div class="foot"></div></div>
+    <div class="sec-head"><nav class="month" aria-label="Mês do extrato"><button type="button" id="jxPrev" aria-label="Mês anterior">‹</button><span>${jarAll?"Tudo":keyLabel(jarMonth)}</span><button type="button" id="jxNext" aria-label="Próximo mês">›</button></nav>
+      <div class="filters"><div class="chips"><button type="button" id="jxAll" aria-pressed="${jarAll}">Ver tudo</button></div><input class="search" id="jxq" type="search" placeholder="Buscar no extrato…" value="${esc(jarQ)}" aria-label="Buscar no extrato"></div></div>
+    ${jarAll?"":`<div class="flow"><div><span class="label">Começou o mês com</span><span class="num v">${brl(start)}</span></div><div><span class="label">Entrou</span><span class="num v pos">+ ${brl(ent)}</span></div><div><span class="label">Saiu</span><span class="num v neg">− ${brl(sai)}</span></div><div><span class="label">${fut?"Vai terminar com":"Terminou com"}</span><span class="num v">${brl(start+ent-sai)}</span></div></div>`}
+    <div class="ledger" id="jxList"></div>
+    <p class="hint" style="margin:0">Toque em <b>Editar</b> para corrigir valor, data, conta ou observação. O saldo de cada linha mostra como o cofrinho ficou depois daquele movimento. Empréstimos que saíram ou voltaram para cá aparecem aqui também.</p>`;
+  el.append(w);
+  w.querySelector('[data-a="g"]').onclick=()=>jarMovSheet(j,"guardar");
+  w.querySelector('[data-a="r"]').onclick=()=>jarMovSheet(j,"resgatar");
+  w.querySelector('[data-a="e"]').onclick=()=>jarMovSheet(j,"resgatar",true);
+  w.querySelector('[data-a="m"]').onclick=()=>{ const f=S.fixas.find(x=>x.tipo==="cofrinho"&&x.cofre===j.id); jarFixaSheet(j,f); };
+  w.querySelector(".foot").append(linkBtn("Editar cofrinho",()=>jarSheet(j)));
+  $("jxBack").onclick=()=>{ jarView=null; render(); window.scrollTo(0,0); };
+  $("jxPrev").onclick=()=>{ jarAll=false; jarMonth=addM(jarMonth,-1); pending=null; render(); };
+  $("jxNext").onclick=()=>{ jarAll=false; jarMonth=addM(jarMonth,1); pending=null; render(); };
+  $("jxAll").onclick=()=>{ jarAll=!jarAll; render(); };
+  const qi=$("jxq"); qi.oninput=()=>{ jarQ=qi.value; jarQFocus=true; render(); };
+  if(jarQFocus){ qi.focus(); qi.setSelectionRange(qi.value.length,qi.value.length); jarQFocus=false; }
+  const q=NORM(jarQ);
+  const rows=H.filter(h=>(jarAll||h.data.startsWith(jarMonth)) && (!q||NORM(h.desc+" "+h.sub).includes(q))).reverse();
+  const list=$("jxList");
+  if(!rows.length){ list.innerHTML=`<div class="empty">${q?"Nada encontrado nessa busca.":`Nenhum movimento neste cofrinho em ${keyLabel(jarMonth)}.`}</div>`; return; }
+  let last=null,dayEl=null,ds=0; const flush=()=>{ if(dayEl) dayEl.lastChild.textContent=sbrl(ds); };
+  rows.forEach(h=>{
+    if(h.data!==last){ flush(); last=h.data; ds=0; dayEl=document.createElement("div"); dayEl.className="day";
+      const [yy,mm,dd]=h.data.split("-").map(Number); dayEl.innerHTML=`<span>${new Date(yy,mm-1,dd).toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:jarAll?"numeric":undefined})}</span><span class="num"></span>`;
+      list.append(dayEl); }
+    ds+=h.v;
+    const r=document.createElement("div"); r.className="row"; r.style.setProperty("--c",h.v<0?"var(--out)":"var(--in)");
+    r.innerHTML=`<span class="stripe"></span><span class="desc"><b>${esc(h.desc)}</b><small>${esc(h.sub)}${h.data>TODAY?' <span class="chip aberta">Agendado</span>':""}</small></span><span class="val num ${h.v<0?"neg":"pos"}">${sbrl(h.v)}<small class="hint" style="display:block;font-weight:600">saldo ${brl(h.saldo)}</small></span><span class="act"></span>`;
+    stmtActions(h).forEach(b=>r.lastChild.append(b));
+    if(h.ref.k==="loanpay") r.lastChild.append(linkBtn("Ver empréstimo",()=>go("emprestimos")));
+    list.append(r);
+  });
+  flush();
+}
 function renderJars(){
   const el=$("jarsList"); el.textContent="";
+  const jv=jarView&&S.cofrinhos.find(x=>x.id===jarView); if(jv){ renderJarStatement(jv); return; } jarView=null;
   $("jarTotal").textContent=`Total guardado: ${brl(sum(S.cofrinhos,jarSaldo))}`;
   if(!S.cofrinhos.length){ el.innerHTML=`<div class="card empty" style="grid-column:1/-1"><strong>Nenhum cofrinho ainda</strong><span>Crie um cofrinho para cada objetivo, como reserva de emergência ou viagem, e acompanhe quanto falta para a meta.</span></div>`; return; }
   S.cofrinhos.forEach(j=>{
@@ -1539,18 +1598,13 @@ function renderJars(){
     { const prev=jarPrev(j), fx=S.fixas.filter(x=>x.tipo==="cofrinho"&&x.cofre===j.id&&!x.pausada), info=document.createElement("p"); info.className="hint"; info.style.margin="0";
       info.innerHTML=[prev,fx.length?`Guarda ${fx.map(x=>`<b class="num">${brl(x.valor)}</b> todo dia ${x.dia}`).join(" e ")}.`:""].filter(Boolean).join(" ");
       if(info.innerHTML) a.querySelector(".actions").before(info); }
-    const h=a.querySelector(".history"), mv=[...(j.movs||[])].sort((x,y)=>y.data.localeCompare(x.data));
-    h.hidden=!openHist.has(j.id);
-    mv.forEach(x=>{ const it=document.createElement("div"); it.className="item";
-      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${x.tipo==="guardar"?"Guardado":"Retirado"} <small>${x.conta?esc(contaNome(x.conta)):x.tipo==="guardar"?"sem sair de conta":"sem ir para conta"}${x.obs?` · ${esc(x.obs)}`:""}</small></span><span class="num ${x.tipo==="guardar"?"pos":"neg"}">${x.tipo==="guardar"?"+":"−"} ${brl(x.valor)}</span><span></span>`;
-      it.lastChild.append(delBtn("s:"+x.id,"Excluir",()=>store.update("cofrinhos",j.id,{movs:(j.movs||[]).filter(i=>i.id!==x.id)}))); h.append(it); });
-    const lm=jarLoanMovs(j).sort((x,y)=>y.data.localeCompare(x.data));
-    lm.forEach(x=>{ const it=document.createElement("div"); it.className="item";
-      it.innerHTML=`<span class="hint num">${fmtDate(x.data)}</span><span>${esc(x.desc)} <small>Empréstimo${x.obs?` · ${esc(x.obs)}`:""}</small></span><span class="num ${x.valor>0?"pos":"neg"}">${sbrl(x.valor)}</span><span></span>`;
-      it.lastChild.append(linkBtn("Ver",()=>go("emprestimos"))); h.append(it); });
+    const H=jarHistory(j), lm=jarLoanMovs(j);
+    const vb=document.createElement("button"); vb.type="button"; vb.className="btn"; vb.style.width="100%"; vb.textContent=`Ver extrato e ajustar (${H.length} movimento${H.length===1?"":"s"})`;
+    vb.onclick=()=>openJar(j.id);
+    a.querySelector(".history").replaceWith(vb);
+    a.style.cursor="pointer"; a.onclick=e=>{ if(!e.target.closest("button,a,input,select,.link")) openJar(j.id); };
     if(lm.length) a.querySelector(".top2 .hint").textContent+=` · inclui ${lm.length} movimento${lm.length>1?"s":""} de empréstimo`;
     const f=a.querySelector(".foot");
-    if(mv.length+lm.length) f.append(linkBtn(openHist.has(j.id)?"Esconder histórico":`Ver histórico (${mv.length})`,()=>{ openHist.has(j.id)?openHist.delete(j.id):openHist.add(j.id); render(); }));
     f.append(linkBtn("Editar",()=>jarSheet(j)), delBtn("jar:"+j.id,"Excluir cofrinho",()=>store.remove("cofrinhos",j.id),"Confirmar exclusão"));
     el.append(a);
   });
@@ -1913,11 +1967,15 @@ function loanSheet(l){
     if(total<valor) throw new Error("O total a devolver não pode ser menor que o valor emprestado.");
     if(v.dir==="emprestei" && isJarSrc(v.conta)){
       const j=S.cofrinhos.find(x=>"cofre:"+x.id===v.conta);
-      const disp=jarSaldo(j)+(l && l.conta===v.conta && l.direcao!=="peguei" ? l.valor : 0);
+      const k=v.conta, sinal=l&&l.direcao==="peguei"?-1:1;
+      const velho=l?(l.conta===k?-sinal*l.valor:0)+sum((l.pagamentos||[]).filter(p=>p.conta===k),p=>sinal*p.valor):0;
+      const volta=sum((l?.pagamentos||[]).filter(p=>p.conta===k),p=>p.valor);
+      const disp=jarSaldo(j)-velho+volta;
       if(valor>disp) throw new Error(`O cofrinho ${j.nome} tem ${brl(disp)}. Escolha um valor até esse ou outro lugar de onde o dinheiro saiu.`);
     }
     const o={direcao:v.dir,pessoa:need(v.pessoa,"Escreva o nome da pessoa."),valor,aReceber:total,data:need(v.data,"Escolha a data."),previsao:v.prev||"",obs:v.obs,conta:v.conta};
     if(l) await store.update("emprestimos",l.id,o); else await store.add("emprestimos",{...o,pagamentos:[],criado:Date.now()});
+    if(isJarSrc(v.conta) && (!l || l.conta!==v.conta)) setTimeout(()=>dupJarSheet(v.conta,v.dir==="emprestei"?"retirar":"guardar",valor,o.pessoa),0);
   });
 }
 function payLoanSheet(l){
@@ -1931,7 +1989,21 @@ function payLoanSheet(l){
     if(valor>loanFalta(l)) throw new Error(`Falta só ${brl(loanFalta(l))}. Informe até esse valor.`);
     if(!out && isJarSrc(v.conta)){ const j=S.cofrinhos.find(x=>"cofre:"+x.id===v.conta); if(valor>jarSaldo(j)) throw new Error(`O cofrinho ${j.nome} tem ${brl(jarSaldo(j))}. Pague até esse valor por ele.`); }
     await store.update("emprestimos",l.id,{pagamentos:[...(l.pagamentos||[]),{id:nid(),valor,data:need(v.data,"Escolha a data."),conta:v.conta}]});
+    if(isJarSrc(v.conta)) setTimeout(()=>dupJarSheet(v.conta,out?"guardar":"retirar",valor,l.pessoa),0);
   });
+}
+// se você já tinha lançado a mesma retirada (ou o mesmo depósito) direto no cofrinho, o valor contaria 2 vezes
+function dupJarSheet(k,tipo,valor,pessoa){
+  const j=S.cofrinhos.find(x=>"cofre:"+x.id===k); if(!j) return;
+  const c=(j.movs||[]).filter(x=>x.tipo===tipo && Math.abs(x.valor-valor)<0.005).sort((a,b)=>b.data.localeCompare(a.data));
+  if(!c.length) return;
+  const nome=tipo==="retirar"?"retirada":"depósito";
+  openSheet(`Já tem essa ${nome} no cofrinho?`,[
+    {id:"mov",label:`Lançamentos de ${brl(valor)} no cofrinho ${j.nome}`,type:"select",wide:true,
+     options:[["","Não, são coisas diferentes (manter os dois)"],...c.map(x=>[x.id,`${fmtDate(x.data)} · ${tipo==="retirar"?"Retirado":"Guardado"}${x.obs?" · "+x.obs:""}`])],value:c[0].id}
+  ],"Confirmar", async v=>{ if(!v.mov) return;
+    await store.update("cofrinhos",j.id,{movs:(j.movs||[]).filter(i=>i.id!==v.mov)}); },
+  `O empréstimo de ${pessoa} agora ${tipo==="retirar"?"tira":"coloca"} ${brl(valor)} no cofrinho ${j.nome}. Se você já tinha lançado essa ${nome} direto no cofrinho, escolha ela aqui: o app apaga a repetida e fica só a do empréstimo, para não contar 2 vezes.`);
 }
 // abatimento: uma dívida compensa a outra, sem dinheiro sair de lugar nenhum
 function abaterSheet(l){
@@ -2389,7 +2461,7 @@ $("clearEx").onclick=async e=>{
 /* ---------- navegação ---------- */
 function closeDlg(id){ const d=$(id); if(d && d.open) d.close(); }
 function openDlg(id){ const d=$(id); try{ d.showModal(); }catch(e){ d.setAttribute("open",""); } }
-function go(t){ closeDlg("mais"); closeDlg("lancar"); bankView=null; tab=t; pending=null; try{ localStorage.setItem("lc-tab",t); }catch(e){} render(); window.scrollTo(0,0); }
+function go(t){ closeDlg("mais"); closeDlg("lancar"); bankView=null; jarView=null; tab=t; pending=null; try{ localStorage.setItem("lc-tab",t); }catch(e){} render(); window.scrollTo(0,0); }
 $("bnav").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b) go(b.dataset.tab); });
 function abrirLancar(){ $("fErr").textContent=""; $("fErr").className="err"; fillCats(); openDlg("lancar"); if(matchMedia("(min-width:721px)").matches) $("fDesc").focus(); }
 $("plusBtn").onclick=abrirLancar;
